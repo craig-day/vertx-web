@@ -19,6 +19,7 @@ import io.vertx.core.MultiMap;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpVersion;
 import io.vertx.ext.web.client.HttpResponse;
+import io.vertx.ext.web.client.spi.CacheStore;
 import io.vertx.ext.web.client.impl.HttpResponseImpl;
 import java.io.IOException;
 import java.io.ObjectInputStream;
@@ -28,7 +29,7 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * A serializable object to be stored by a {@link io.vertx.ext.web.client.cache.CacheAdapter}.
+ * A serializable object to be stored by a {@link CacheStore}.
  *
  * @author <a href="mailto:craigday3@gmail.com">Craig Day</a>
  */
@@ -47,8 +48,9 @@ public class CachedHttpResponse implements Serializable {
   transient private final List<String> cookies;
   transient private final List<String> redirects;
   transient private CacheControl cacheControl;
+  transient private Vary vary;
 
-  static CachedHttpResponse create(HttpResponse<?> response) {
+  static CachedHttpResponse wrap(HttpResponse<?> response) {
     return new CachedHttpResponse(
       response.version().name(),
       response.statusCode(),
@@ -61,34 +63,67 @@ public class CachedHttpResponse implements Serializable {
     );
   }
 
+  static CachedHttpResponse wrap(HttpResponse<?> response, CacheControl cacheControl) {
+    return new CachedHttpResponse(
+      response.version().name(),
+      response.statusCode(),
+      response.statusMessage(),
+      response.bodyAsBuffer(),
+      response.headers(),
+      response.trailers(),
+      response.cookies(),
+      response.followedRedirects(),
+      cacheControl
+    );
+  }
+
   CachedHttpResponse(String version, int statusCode, String statusMessage, Buffer body,
     MultiMap headers, MultiMap trailers, List<String> cookies,
     List<String> redirects) {
+    this(version, statusCode, statusMessage, body, headers,
+      trailers, cookies, redirects, CacheControl.parse(headers));
+  }
+
+  CachedHttpResponse(String version, int statusCode, String statusMessage, Buffer body,
+    MultiMap headers, MultiMap trailers, List<String> cookies,
+    List<String> redirects, CacheControl cacheControl) {
     this.version = version;
     this.statusCode = statusCode;
     this.statusMessage = statusMessage;
     this.body = body;
     this.headers = headers;
+    this.timestamp = Instant.now(); // TODO: should we look at the Date or Age header instead?
     this.trailers = trailers;
     this.cookies = cookies;
     this.redirects = redirects;
-    this.cacheControl = CacheControl.parse(headers);
-    this.timestamp = Instant.now(); // TODO: should we look at the Date or Age header instead?
+    this.cacheControl = cacheControl;
+    this.vary = new Vary(headers);
   }
 
   public boolean isFresh() {
-    return age() > getCacheControl().maxAge();
+    return age() <= cacheControl().maxAge();
   }
 
   public long age() {
     return Duration.between(timestamp, Instant.now()).getSeconds();
   }
 
-  public CacheControl getCacheControl() {
+  public MultiMap headers() {
+    return headers;
+  }
+
+  public CacheControl cacheControl() {
     if (cacheControl == null) {
       this.cacheControl = CacheControl.parse(headers);
     }
     return cacheControl;
+  }
+
+  public Vary vary() {
+    if (vary == null) {
+      this.vary = new Vary(headers);
+    }
+    return vary;
   }
 
   public HttpResponse<Buffer> rehydrate() {
@@ -107,5 +142,6 @@ public class CachedHttpResponse implements Serializable {
   private void readObject(ObjectInputStream ois) throws ClassNotFoundException, IOException {
     ois.defaultReadObject();
     this.cacheControl = CacheControl.parse(headers);
+    this.vary = new Vary(headers);
   }
 }

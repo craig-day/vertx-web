@@ -16,42 +16,50 @@
 package io.vertx.ext.web.client.impl.cache;
 
 import io.vertx.core.MultiMap;
+import io.vertx.ext.web.client.CachingWebClientOptions;
 import io.vertx.ext.web.client.HttpRequest;
+import io.vertx.ext.web.client.spi.CacheStore;
 import io.vertx.ext.web.client.impl.HttpRequestImpl;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
 /**
- * A key for a {@link io.vertx.ext.web.client.cache.CacheAdapter} based on a {@link HttpRequest}.
+ * A key for a {@link CacheStore} based on a {@link HttpRequest}.
  *
  * @author <a href="mailto:craigday3@gmail.com">Craig Day</a>
  */
 public class CacheKey {
 
   private final HttpRequestImpl<?> request;
+  private final CachingWebClientOptions options;
 
-  public CacheKey(HttpRequest<?> request) {
+  public CacheKey(HttpRequest<?> request, CachingWebClientOptions options) {
     this.request = (HttpRequestImpl<?>) request;
+    this.options = options;
   }
 
-  public String digest() {
-    List<String> keyParts = new ArrayList<>(3);
+  @Override
+  public String toString() {
+    List<String> keyParts = new ArrayList<>(options.isVaryCachingEnabled() ? 4 : 3);
 
     keyParts.add(request.host());
     keyParts.add(Integer.toString(request.port()));
     keyParts.add(queryString(request.queryParams()));
 
+    if (options.isVaryCachingEnabled()) {
+      keyParts.add(userAgentVariation(request.headers()));
+    }
+
     String rawKey = String.join("|", keyParts);
 
     try {
-      MessageDigest digest = MessageDigest.getInstance("SHA3-256");
+      MessageDigest digest = MessageDigest.getInstance("SHA-256");
       byte[] hashed = digest.digest(rawKey.getBytes(StandardCharsets.UTF_8));
       return bytesToHex(hashed);
-    } catch (NoSuchAlgorithmException e) {
+    } catch (Exception e) {
       return rawKey;
     }
   }
@@ -61,6 +69,10 @@ public class CacheKey {
       .stream()
       .map(e -> e.getKey() + "=" + e.getValue())
       .collect(Collectors.joining("&"));
+  }
+
+  private String userAgentVariation(MultiMap headers) {
+    return UserAgent.parse(headers).normalize();
   }
 
   private static String bytesToHex(byte[] hash) {
