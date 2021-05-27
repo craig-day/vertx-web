@@ -36,13 +36,11 @@ import org.junit.runner.RunWith;
 @RunWith(VertxUnitRunner.class)
 public class CachingWebClientTest {
 
-  private static final int PORT = 8080;
+  private static final int PORT = 8888;
 
-  private TestCacheStore store;
-  private TestCacheStore privateStore;
   private WebClient defaultClient;
   private WebClient privateClient;
-  private WebClient baseWebClient;
+  private WebClient varyClient;
   private Vertx vertx;
   private HttpServer server;
 
@@ -59,18 +57,15 @@ public class CachingWebClientTest {
   @Before
   public void setUp() {
     vertx = Vertx.vertx();
-    baseWebClient = buildBaseWebClient();
-    store = new TestCacheStore();
-    privateStore = new TestCacheStore();
-    defaultClient = CachingWebClient.create(baseWebClient, store, new CachingWebClientOptions(true, false, false));
-    privateClient = CachingWebClient.create(baseWebClient, privateStore, new CachingWebClientOptions(true, true, false));
+    WebClient base = buildBaseWebClient();
+    defaultClient = CachingWebClient.create(base, new TestCacheStore(), new CachingWebClientOptions(true, false, false));
+    privateClient = CachingWebClient.create(base, new TestCacheStore(), new CachingWebClientOptions(true, true, false));
+    varyClient = CachingWebClient.create(base, new TestCacheStore(), new CachingWebClientOptions(true, false, true));
     server = buildHttpServer();
   }
 
   @After
   public void tearDown(TestContext context) {
-    store.flush(context.asyncAssertSuccess());
-    privateStore.flush(context.asyncAssertSuccess());
     vertx.close(context.asyncAssertSuccess());
   }
 
@@ -92,6 +87,44 @@ public class CachingWebClientTest {
     startMockServer(context, req -> {
       req.response().headers().set("Cache-Control", cacheControl);
     });
+  }
+
+  private String executeRequestBlocking(TestContext context, WebClient client, Consumer<HttpRequest<Buffer>> reqConsumer) {
+    Async waiter = context.async();
+    AtomicReference<String> body = new AtomicReference<>();
+    HttpRequest<Buffer> request = client.get("localhost", "/");
+
+    reqConsumer.accept(request);
+
+    request.send(context.asyncAssertSuccess(response -> {
+      body.set(response.bodyAsString());
+      waiter.complete();
+    }));
+    waiter.await();
+
+    context.assertNotNull(body.get());
+
+    return body.get();
+  }
+
+  private String executeGetBlocking(TestContext context, Consumer<HttpRequest<Buffer>> reqConsumer) {
+    return executeRequestBlocking(context, defaultClient, reqConsumer);
+  }
+
+  private String executeGetBlocking(TestContext context) {
+    return executeRequestBlocking(context, defaultClient, req -> {});
+  }
+
+  private String executeGetBlocking(TestContext context, String uri) {
+    return executeGetBlocking(context, req -> req.uri(uri));
+  }
+
+  private String executeGetBlocking(TestContext context, WebClient client) {
+    return executeRequestBlocking(context, client, req -> {});
+  }
+
+  private String executeGetBlocking(TestContext context, WebClient client, Consumer<HttpRequest<Buffer>> reqConsumer) {
+    return executeRequestBlocking(context, client, reqConsumer);
   }
 
   private void assertCacheUse(TestContext context, HttpMethod method, WebClient client, boolean shouldCacheBeUsed) {
@@ -144,6 +177,17 @@ public class CachingWebClientTest {
 
   private void assertNotCached(TestContext context) {
     assertNotCached(context, defaultClient);
+  }
+
+  // Test cache disabled via config
+
+  @Test
+  public void testCacheConfigDisable(TestContext context) {
+    WebClient client = CachingWebClient.create(defaultClient, new TestCacheStore(),
+      new CachingWebClientOptions(false, false, false));
+
+    startMockServer(context, "public, max-age=600");
+    assertNotCached(context, client);
   }
 
   // Non-GET methods that we shouldn't cache
@@ -311,7 +355,9 @@ public class CachingWebClientTest {
     Async req2 = context.async();
     Async req3 = context.async();
     Async waiter = context.async();
-    List<HttpResponse<Buffer>> responses = new ArrayList<>(3);
+    AtomicReference<String> body1 = new AtomicReference<>();
+    AtomicReference<String> body2 = new AtomicReference<>();
+    AtomicReference<String> body3 = new AtomicReference<>();
 
     startMockServer(context, req -> {
       String maxAge = req1.isCompleted() ? "0" : "1";
@@ -320,13 +366,13 @@ public class CachingWebClientTest {
     });
 
     defaultClient.get("localhost", "/").send(context.asyncAssertSuccess(resp -> {
-      responses.add(resp);
+      body1.set(resp.bodyAsString());
       req1.complete();
     }));
     req1.await();
 
     defaultClient.get("localhost", "/").send(context.asyncAssertSuccess(resp -> {
-      responses.add(resp);
+      body2.set(resp.bodyAsString());
       req2.complete();
     }));
     req2.await();
@@ -336,14 +382,16 @@ public class CachingWebClientTest {
     waiter.await();
 
     defaultClient.get("localhost", "/").send(context.asyncAssertSuccess(resp -> {
-      responses.add(resp);
+      body3.set(resp.bodyAsString());
       req3.complete();
     }));
     req3.await();
 
-    context.assertEquals(responses.size(), 3);
-    context.assertEquals(responses.get(0).bodyAsString(), responses.get(1).bodyAsString());
-    context.assertNotEquals(responses.get(1).bodyAsString(), responses.get(2).bodyAsString());
+    context.assertNotNull(body1.get());
+    context.assertNotNull(body2.get());
+    context.assertNotNull(body3.get());
+    context.assertEquals(body1.get(), body2.get());
+    context.assertNotEquals(body1.get(), body3.get());
   }
 
   @Test
@@ -380,102 +428,89 @@ public class CachingWebClientTest {
 
   @Test
   public void testUpdateStaleResponse(TestContext context) {
-    Async req1 = context.async();
-    Async req2 = context.async();
-    Async req3 = context.async();
     Async waiter = context.async();
-    List<HttpResponse<Buffer>> responses = new ArrayList<>(3);
 
     startMockServer(context, "public, max-age=1");
 
-    defaultClient.get("localhost", "/").send(context.asyncAssertSuccess(resp -> {
-      responses.add(resp);
-      req1.complete();
-    }));
-    req1.await();
+    String body1 = executeGetBlocking(context);
 
     vertx.setTimer(2000, l -> waiter.complete());
     waiter.await();
 
-    defaultClient.get("localhost", "/").send(context.asyncAssertSuccess(resp -> {
-      responses.add(resp);
-      req2.complete();
-    }));
-    req2.await();
+    String body2 = executeGetBlocking(context);
+    String body3 = executeGetBlocking(context);
 
-    defaultClient.get("localhost", "/").send(context.asyncAssertSuccess(resp -> {
-      responses.add(resp);
-      req3.complete();
-    }));
-    req3.await();
+    context.assertNotEquals(body1, body2);
+    context.assertEquals(body2, body3);
+  }
 
-    context.assertEquals(responses.size(), 3);
-    context.assertNotEquals(responses.get(0).bodyAsString(), responses.get(1).bodyAsString());
-    context.assertEquals(responses.get(1).bodyAsString(), responses.get(2).bodyAsString());
+  @Test
+  public void testMatchingPaths(TestContext context) {
+    startMockServer(context, "public, max-age=300");
+
+    String body1 = executeGetBlocking(context, "/path/to/resource");
+    String body2 = executeGetBlocking(context, "/path/to/resource");
+
+    context.assertEquals(body1, body2);
+  }
+
+  @Test
+  public void testDifferentPaths(TestContext context) {
+    startMockServer(context, "public, max-age=300");
+
+    String body1 = executeGetBlocking(context, "/path/to/resource");
+    String body2 = executeGetBlocking(context, "/other/path");
+
+    context.assertNotEquals(body1, body2);
   }
 
   @Test
   public void testWithMatchingQueryParams(TestContext context) {
     startMockServer(context, "public, max-age=300");
 
-    Async req1 = context.async();
-    Async req2 = context.async();
-    AtomicReference<String> body1 = new AtomicReference<>();
-    AtomicReference<String> body2 = new AtomicReference<>();
+    String body1 = executeGetBlocking(context, req -> {
+      req.setQueryParam("q", "search");
+    });
 
-    defaultClient
-      .get("localhost", "/")
-      .setQueryParam("q", "search")
-      .send(context.asyncAssertSuccess(resp -> {
-        body1.set(resp.bodyAsString());
-        req1.complete();
-      }));
-    req1.await();
+    String body2 = executeGetBlocking(context, req -> {
+      req.setQueryParam("q", "search");
+    });
 
-    defaultClient
-      .get("localhost", "/")
-      .setQueryParam("q", "search")
-      .send(context.asyncAssertSuccess(resp -> {
-        body2.set(resp.bodyAsString());
-        req2.complete();
-      }));
-    req2.await();
-
-    context.assertNotNull(body1.get());
-    context.assertNotNull(body2.get());
-    context.assertEquals(body1.get(), body2.get());
+    context.assertEquals(body1, body2);
   }
 
   @Test
   public void testWithDifferentQueryParams(TestContext context) {
     startMockServer(context, "public, max-age=300");
 
-    Async req1 = context.async();
-    Async req2 = context.async();
-    AtomicReference<String> body1 = new AtomicReference<>();
-    AtomicReference<String> body2 = new AtomicReference<>();
+    String body1 = executeGetBlocking(context, req -> {
+      req.setQueryParam("q", "search");
+    });
 
-    defaultClient
-      .get("localhost", "/")
-      .setQueryParam("q", "search")
-      .send(context.asyncAssertSuccess(resp -> {
-        body1.set(resp.bodyAsString());
-        req1.complete();
-      }));
-    req1.await();
+    String body2 = executeGetBlocking(context, req -> {
+      req.setQueryParam("q", "other");
+    });
 
-    defaultClient
-      .get("localhost", "/")
-      .setQueryParam("q", "other")
-      .send(context.asyncAssertSuccess(resp -> {
-        body2.set(resp.bodyAsString());
-        req2.complete();
-      }));
-    req2.await();
+    context.assertNotEquals(body1, body2);
+  }
 
-    context.assertNotNull(body1.get());
-    context.assertNotNull(body2.get());
-    context.assertNotEquals(body1.get(), body2.get());
+  @Test
+  public void testWithDifferentQueryParamOrdering(TestContext context) {
+    startMockServer(context, "public, max-age=300");
+
+    String body1 = executeGetBlocking(context, req -> {
+      req
+        .setQueryParam("q", "search")
+        .setQueryParam("param", "value");
+    });
+
+    String body2 = executeGetBlocking(context, req -> {
+      req
+        .setQueryParam("param", "value")
+        .setQueryParam("q", "search");
+    });
+
+    context.assertEquals(body1, body2);
   }
 
   // Cache-Control: private with client NOT enabled private caching
@@ -541,216 +576,211 @@ public class CachingWebClientTest {
   public void testPrivateSharedMaxAgeAndMaxAge(TestContext context) {
     startMockServer(context, "private, s-maxage=300, max-age=1");
 
-    Async req1 = context.async();
-    Async req2 = context.async();
-    Async req3 = context.async();
     Async waiter = context.async();
-    List<HttpResponse<Buffer>> responses = new ArrayList<>(3);
 
-    privateClient.get("localhost", "/").send(context.asyncAssertSuccess(resp -> {
-      responses.add(resp);
-      req1.complete();
-    }));
-    req1.await();
-
-    privateClient.get("localhost", "/").send(context.asyncAssertSuccess(resp -> {
-      responses.add(resp);
-      req2.complete();
-    }));
-    req2.await();
+    String body1 = executeGetBlocking(context, privateClient);
+    String body2 = executeGetBlocking(context, privateClient);
 
     // Wait for the max-age time to pass, but not long enough for s-maxage
     // HTTP cache only has 1 second resolution, so this must be 1+ seconds past than the max-age
     vertx.setTimer(2000, l -> waiter.complete());
     waiter.await();
 
-    privateClient.get("localhost", "/").send(context.asyncAssertSuccess(resp -> {
-      responses.add(resp);
-      req3.complete();
-    }));
-    req3.await();
+    String body3 = executeGetBlocking(context, privateClient);
 
-    context.assertEquals(responses.size(), 3);
-    context.assertEquals(responses.get(0).bodyAsString(), responses.get(1).bodyAsString());
-    context.assertNotEquals(responses.get(1).bodyAsString(), responses.get(2).bodyAsString());
+    context.assertEquals(body1, body2);
+    context.assertNotEquals(body2, body3);
   }
 
   // Cache-Control: public; Vary: User-Agent
 
   @Test
   public void testPublicVaryMaxAgeZero(TestContext context) {
-    WebClient client = CachingWebClient.create(defaultClient, new TestCacheStore(),
-      new CachingWebClientOptions(true, false, true));
-
     startMockServer(context, req -> {
       req.response().headers().add("Cache-Control", "public, max-age=0");
       req.response().headers().add("Vary", "User-Agent");
     });
 
-    assertNotCached(context, client);
+    assertNotCached(context, varyClient);
   }
 
   @Test
   public void testVaryUserAgentTwoDesktops(TestContext context) {
-    WebClient client = CachingWebClient.create(baseWebClient, new TestCacheStore(),
-      new CachingWebClientOptions(true, false, true));
-
     startMockServer(context, req -> {
       req.response().headers().add("Cache-Control", "public, max-age=300");
       req.response().headers().add("Vary", "User-Agent");
     });
 
-    Async req1 = context.async();
-    Async req2 = context.async();
-    AtomicReference<String> body1 = new AtomicReference<>();
-    AtomicReference<String> body2 = new AtomicReference<>();
-
     // Chrome Desktop
-    client
-      .get("localhost", "/")
-      .putHeader("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.103 Safari/537.36")
-      .send(context.asyncAssertSuccess(resp -> {
-        body1.set(resp.bodyAsString());
-        req1.complete();
-      }));
-    req1.await();
+    String body1 = executeGetBlocking(context, varyClient, req -> {
+      req.putHeader("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.103 Safari/537.36");
+    });
 
     // Firefox Desktop
-    client
-      .get("localhost", "/")
-      .putHeader("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X x.y; rv:42.0) Gecko/20100101 Firefox/42.0")
-      .send(context.asyncAssertSuccess(resp -> {
-        body2.set(resp.bodyAsString());
-        req2.complete();
-      }));
-    req2.await();
+    String body2 = executeGetBlocking(context, varyClient, req -> {
+      req.putHeader("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X x.y; rv:42.0) Gecko/20100101 Firefox/42.0");
+    });
 
     // Desktop user agents are normalized so two desktop clients should hit the same cache
-    context.assertNotNull(body1.get());
-    context.assertNotNull(body2.get());
-    context.assertEquals(body1.get(), body2.get());
+    context.assertEquals(body1, body2);
   }
 
   @Test
   public void testVaryUserAgentDesktopVsMobile(TestContext context) {
-    WebClient client = CachingWebClient.create(baseWebClient, new TestCacheStore(),
-      new CachingWebClientOptions(true, false, true));
-
     startMockServer(context, req -> {
       req.response().headers().add("Cache-Control", "public, max-age=300");
       req.response().headers().add("Vary", "User-Agent");
     });
 
-    Async req1 = context.async();
-    Async req2 = context.async();
-    AtomicReference<String> body1 = new AtomicReference<>();
-    AtomicReference<String> body2 = new AtomicReference<>();
-
     // Chrome Desktop
-    client
-      .get("localhost", "/")
-      .putHeader("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.103 Safari/537.36")
-      .send(context.asyncAssertSuccess(resp -> {
-        body1.set(resp.bodyAsString());
-        req1.complete();
-      }));
-    req1.await();
+    String body1 = executeGetBlocking(context, varyClient, req -> {
+      req.putHeader("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.103 Safari/537.36");
+    });
 
     // iPhone Mobile
-    client
-      .get("localhost", "/")
-      .putHeader("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 13_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.1.1 Mobile/15E148 Safari/604.1")
-      .send(context.asyncAssertSuccess(resp -> {
-        body2.set(resp.bodyAsString());
-        req2.complete();
-      }));
-    req2.await();
+    String body2 = executeGetBlocking(context, varyClient, req -> {
+      req.putHeader("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 13_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.1.1 Mobile/15E148 Safari/604.1");
+    });
 
     // Desktop and Mobile may receive different content and should not share a cache
-    context.assertNotNull(body1.get());
-    context.assertNotNull(body2.get());
-    context.assertNotEquals(body1.get(), body2.get());
+    context.assertNotEquals(body1, body2);
   }
 
   // Cache-Control: public; Vary: Content-Encoding
 
   @Test
   public void testVaryEncodingOverlap(TestContext context) {
-    WebClient client = CachingWebClient.create(baseWebClient, new TestCacheStore(),
-      new CachingWebClientOptions(true, false, true));
-
     startMockServer(context, req -> {
       req.response().headers().add("Cache-Control", "public, max-age=300");
       req.response().headers().add("Content-Encoding", "gzip");
       req.response().headers().add("Vary", "Accept-Encoding");
     });
 
-    Async req1 = context.async();
-    Async req2 = context.async();
-    AtomicReference<String> body1 = new AtomicReference<>();
-    AtomicReference<String> body2 = new AtomicReference<>();
+    String body1 = executeGetBlocking(context, varyClient, req -> {
+      req.putHeader("Accept-Encoding", "gzip,deflate,sdch");
+    });
 
-    client
-      .get("localhost", "/")
-      .putHeader("Accept-Encoding", "gzip,deflate,sdch")
-      .send(context.asyncAssertSuccess(resp -> {
-        body1.set(resp.bodyAsString());
-        req1.complete();
-      }));
-    req1.await();
-
-    client
-      .get("localhost", "/")
-      .putHeader("Accept-Encoding", "gzip,deflate")
-      .send(context.asyncAssertSuccess(resp -> {
-        body2.set(resp.bodyAsString());
-        req2.complete();
-      }));
-    req2.await();
+    String body2 = executeGetBlocking(context, varyClient, req -> {
+      req.putHeader("Accept-Encoding", "gzip,deflate");
+    });
 
     // Both accept gzip, so cache should be used
-    context.assertNotNull(body1.get());
-    context.assertNotNull(body2.get());
-    context.assertEquals(body1.get(), body2.get());
+    context.assertEquals(body1, body2);
   }
 
   @Test
   public void testVaryEncodingDifferent(TestContext context) {
-    WebClient client = CachingWebClient.create(baseWebClient, new TestCacheStore(),
-      new CachingWebClientOptions(true, false, true));
-
     startMockServer(context, req -> {
       req.response().headers().add("Cache-Control", "public, max-age=300");
       req.response().headers().add("Content-Encoding", "gzip");
       req.response().headers().add("Vary", "Accept-Encoding");
     });
 
-    Async req1 = context.async();
-    Async req2 = context.async();
-    AtomicReference<String> body1 = new AtomicReference<>();
-    AtomicReference<String> body2 = new AtomicReference<>();
+    String body1 = executeGetBlocking(context, varyClient, req -> {
+      req.putHeader("Accept-Encoding", "gzip,deflate");
+    });
 
-    client
-      .get("localhost", "/")
-      .putHeader("Accept-Encoding", "gzip,deflate")
-      .send(context.asyncAssertSuccess(resp -> {
-        body1.set(resp.bodyAsString());
-        req1.complete();
-      }));
-    req1.await();
+    String body2 = executeGetBlocking(context, varyClient, req -> {
+      req.putHeader("Accept-Encoding", "br");
+    });
 
-    client
-      .get("localhost", "/")
-      .putHeader("Accept-Encoding", "br")
-      .send(context.asyncAssertSuccess(resp -> {
-        body2.set(resp.bodyAsString());
-        req2.complete();
-      }));
-    req2.await();
+    context.assertNotEquals(body1, body2);
+  }
 
-    context.assertNotNull(body1.get());
-    context.assertNotNull(body2.get());
-    context.assertNotEquals(body1.get(), body2.get());
+  @Test
+  public void testVaryCustomHeader(TestContext context) {
+    startMockServer(context, req -> {
+      req.response().headers().add("Cache-Control", "public, max-age=300");
+      req.response().headers().add("Vary", "X-Custom-Header");
+    });
+
+    String body1 = executeGetBlocking(context, varyClient, req -> {
+      req.putHeader("X-Custom-Header", "0x00000000");
+    });
+
+    String body2 = executeGetBlocking(context, varyClient, req -> {
+      req.putHeader("X-Custom-Header", "0xDEADBEEF");
+    });
+
+    String body3 = executeGetBlocking(context, varyClient, req -> {
+      req.putHeader("X-Custom-Header", "0x00000000");
+    });
+
+    context.assertNotEquals(body1, body2);
+    context.assertNotEquals(body2, body3);
+    context.assertEquals(body1, body3);
+  }
+
+  @Test
+  public void testVaryUserAgentAndCustomHeader(TestContext context) {
+    startMockServer(context, req -> {
+      req.response().headers().add("Cache-Control", "public, max-age=300");
+      req.response().headers().add("Vary", "User-Agent, X-Custom-Header");
+    });
+
+    // 1. Chrome desktop, custom header 0
+    String body1 = executeGetBlocking(context, varyClient, req -> {
+      req
+        .putHeader("X-Custom-Header", "0x00000000")
+        .putHeader("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.103 Safari/537.36");
+    });
+
+    // 2. Chrome desktop, custom header deadbeef, should not be cached
+    String body2 = executeGetBlocking(context, varyClient, req -> {
+      req
+        .putHeader("X-Custom-Header", "0xDEADBEEF")
+        .putHeader("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.103 Safari/537.36");
+    });
+
+    // 3. Chrome desktop, custom header 0, should be cached from req1
+    String body3 = executeGetBlocking(context, varyClient, req -> {
+      req
+        .putHeader("X-Custom-Header", "0x00000000")
+        .putHeader("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.103 Safari/537.36");
+    });
+
+    // 4. iPhone mobile, custom header 0, should not be cached
+    String body4 = executeGetBlocking(context, varyClient, req -> {
+      req
+        .putHeader("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 13_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.1.1 Mobile/15E148 Safari/604.1")
+        .putHeader("X-Custom-Header", "0x00000000");
+    });
+
+    context.assertNotEquals(body1, body2);
+    context.assertEquals(body1, body3);
+    context.assertNotEquals(body1, body4);
+    context.assertNotEquals(body2, body3);
+    context.assertNotEquals(body2, body4);
+    context.assertNotEquals(body3, body4);
+  }
+
+  @Test
+  public void testVaryWithStaleResponse(TestContext context) {
+    startMockServer(context, req -> {
+      req.response().headers().add("Cache-Control", "public, max-age=2");
+      req.response().headers().add("Vary", "User-Agent");
+    });
+
+    Async waiter = context.async();
+
+    String body1 = executeGetBlocking(context, varyClient, req -> {
+      req.putHeader("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 13_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.1.1 Mobile/15E148 Safari/604.1");
+    });
+
+    String body2 = executeGetBlocking(context, varyClient, req -> {
+      req.putHeader("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 13_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.1.1 Mobile/15E148 Safari/604.1");
+    });
+
+    vertx.setTimer(3000, l -> waiter.complete());
+    waiter.await();
+
+    String body3 = executeGetBlocking(context, varyClient, req -> {
+      req.putHeader("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 13_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.1.1 Mobile/15E148 Safari/604.1");
+    });
+
+    context.assertEquals(body1, body2);
+    context.assertNotEquals(body1, body3);
+    context.assertNotEquals(body2, body3);
   }
 
   static class TestCacheStore implements CacheStore {

@@ -16,32 +16,47 @@
 package io.vertx.ext.web.client.impl.cache;
 
 import io.vertx.core.Future;
+import io.vertx.core.Vertx;
+import io.vertx.core.shareddata.AsyncMap;
+import io.vertx.core.shareddata.SharedData;
 import io.vertx.ext.web.client.spi.CacheStore;
 
 /**
- * A {@link CacheStore} implementation that does nothing.
- *
- * @author <a href="mailto:craigday3@gmail.com">Craig Day</a>
+ * A basic implementation of a {@link CacheStore} using an {@link AsyncMap} from {@link SharedData}.
  */
-public final class NoOpCacheStore implements CacheStore {
+public class SharedDataCacheStore implements CacheStore {
+
+  private static final String ASYNC_MAP_NAME = "HttpCacheStore";
+
+  private final SharedData sharedData;
+
+  public SharedDataCacheStore(Vertx vertx) {
+    this.sharedData = vertx.sharedData();
+  }
 
   @Override
   public Future<CachedHttpResponse> get(CacheKey key) {
-    return Future.failedFuture("The no-op cache store cannot return results");
+    return asyncMap().compose(map -> map.get(key));
   }
 
   @Override
   public Future<CachedHttpResponse> set(CacheKey key, CachedHttpResponse response) {
-    return Future.succeededFuture(response);
+    return asyncMap()
+      .compose(map -> map.put(key, response))
+      .map(response);
   }
 
   @Override
   public Future<Void> delete(CacheKey key) {
-    return Future.succeededFuture();
+    return asyncMap().compose(map -> map.remove(key)).mapEmpty();
   }
 
   @Override
   public Future<Void> flush() {
-    return Future.succeededFuture();
+    return asyncMap().compose(AsyncMap::clear);
+  }
+
+  private Future<AsyncMap<CacheKey, CachedHttpResponse>> asyncMap() {
+    return sharedData.getAsyncMap(ASYNC_MAP_NAME);
   }
 }

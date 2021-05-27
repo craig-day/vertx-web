@@ -17,6 +17,7 @@ package io.vertx.ext.web.client;
 
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpClient;
+import io.vertx.ext.web.client.impl.cache.SharedDataCacheStore;
 import io.vertx.ext.web.client.spi.CacheStore;
 import io.vertx.ext.web.client.impl.WebClientBase;
 import io.vertx.ext.web.client.impl.CachingWebClientImpl;
@@ -55,6 +56,31 @@ import io.vertx.ext.web.client.impl.cache.CacheManager;
 public interface CachingWebClient {
 
   /**
+   * Create a cache aware web client using an
+   * {@link io.vertx.core.shareddata.AsyncMap} as the {@link CacheStore}.
+   *
+   * @param vertx the vertx instance
+   * @return the creatd web client
+   */
+  static WebClient create(Vertx vertx) {
+    CachingWebClientOptions options = new CachingWebClientOptions();
+    return create(vertx, options);
+  }
+
+  /**
+   * Create a cache aware web client using the options and an
+   * {@link io.vertx.core.shareddata.AsyncMap} as the {@link CacheStore}.
+   *
+   * @param vertx   the vertx instance
+   * @param options the caching web client options
+   * @return the created web client
+   */
+  static WebClient create(Vertx vertx, CachingWebClientOptions options) {
+    CacheStore store = new SharedDataCacheStore(vertx);
+    return create(vertx, store, options);
+  }
+
+  /**
    * Create a cache aware web client using the provided {@link CacheStore}.
    *
    * @param vertx      the vertx instance
@@ -83,7 +109,7 @@ public interface CachingWebClient {
    *
    * @param vertx      the vertx instance
    * @param cacheStore the cache adapter
-   * @param options    the Web Client Cache options
+   * @param options    the caching web client options
    * @return the created web client
    */
   static WebClient create(Vertx vertx, CacheStore cacheStore, CachingWebClientOptions options) {
@@ -96,7 +122,7 @@ public interface CachingWebClient {
    *
    * @param webClient  the web client instance
    * @param cacheStore the cache adapter
-   * @param options    the Web Client Cache options
+   * @param options    the caching web client options
    * @return the created web client
    */
   static WebClient create(WebClient webClient, CacheStore cacheStore, CachingWebClientOptions options) {
@@ -121,7 +147,7 @@ public interface CachingWebClient {
    *
    * @param httpClient the http client to wrap
    * @param cacheStore the cache adapter
-   * @param options    the Web Client Cache options
+   * @param options    the caching web client options
    * @return the created web client
    */
   static WebClient wrap(HttpClient httpClient, CacheStore cacheStore, CachingWebClientOptions options) {

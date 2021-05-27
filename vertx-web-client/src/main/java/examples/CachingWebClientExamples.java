@@ -24,4 +24,16 @@ public class CachingWebClientExamples {
       .onFailure(err ->
         System.out.println("Something went wrong " + err.getMessage()));
   }
+
+  public void simpleGetWithSharedDataCaching(Vertx vertx) {
+    WebClient client = CachingWebClient.create(vertx);
+
+    client
+      .get(8080, "myserver.mycompany.com", "/some-uri")
+      .send()
+      .onSuccess(response -> System.out
+        .println("Received response with age" + response.headers().get(HttpHeaders.AGE)))
+      .onFailure(err ->
+        System.out.println("Something went wrong " + err.getMessage()));
+  }
 }

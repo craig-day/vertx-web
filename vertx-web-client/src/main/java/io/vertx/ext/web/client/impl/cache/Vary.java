@@ -18,6 +18,7 @@ package io.vertx.ext.web.client.impl.cache;
 import io.vertx.core.MultiMap;
 import io.vertx.core.http.HttpHeaders;
 import io.vertx.ext.web.client.HttpRequest;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
@@ -29,10 +30,12 @@ import java.util.stream.Collectors;
  */
 public class Vary {
 
-  final MultiMap responseHeaders;
-  final Set<CharSequence> variations;
+  private final MultiMap requestHeaders;
+  private final MultiMap responseHeaders;
+  private final Set<CharSequence> variations;
 
-  public Vary(MultiMap responseHeaders) {
+  public Vary(MultiMap requestHeaders, MultiMap responseHeaders) {
+    this.requestHeaders = requestHeaders;
     this.responseHeaders = responseHeaders;
     this.variations = parseHeaders(responseHeaders);
   }
@@ -41,11 +44,20 @@ public class Vary {
     return variations.stream().allMatch(variation -> variationMatches(variation, request));
   }
 
+  @Override
+  public String toString() {
+    List<String> parts = new ArrayList<>(variations.size());
+
+    for (CharSequence variation : variations) {
+      parts.addAll(normalizeValues(requestHeaders.getAll(variation)));
+    }
+
+    return parts.stream().sorted().collect(Collectors.joining(","));
+  }
+
   private boolean variationMatches(CharSequence variation, HttpRequest<?> request) {
     if (HttpHeaders.USER_AGENT.equals(variation)) {
-      // User-Agent is embedded in the key since it is only a request property, not response, so we
-      // can short-circuit here and return true because it's already been verified by the key.
-      return true;
+      return isUserAgentMatch(request);
     } else if (HttpHeaders.CONTENT_ENCODING.equals(variation)) {
       return isEncodingMatch(request);
     } else if (HttpHeaders.ACCEPT_ENCODING.equals(variation)) {
@@ -55,12 +67,19 @@ public class Vary {
     }
   }
 
+  private boolean isUserAgentMatch(HttpRequest<?> request) {
+    UserAgent original = UserAgent.parse(requestHeaders);
+    UserAgent current = UserAgent.parse(request.headers());
+
+    return original.equals(current);
+  }
+
   private boolean isEncodingMatch(HttpRequest<?> request) {
     Set<String> req = normalizeValues(request.headers().getAll(HttpHeaders.ACCEPT_ENCODING));
     Set<String> res = normalizeValues(responseHeaders.getAll(HttpHeaders.CONTENT_ENCODING));
 
     // If the request is asking for any form of encoding the response mentioned, assume a match
-    // For example, Accept-Encoding: gzip,deflate
+    // For example, `Accept-Encoding: gzip,deflate` should match `Content-Encoding: gzip`
     Set<String> intersection = new HashSet<>(req);
     intersection.retainAll(res);
 
@@ -69,7 +88,7 @@ public class Vary {
 
   private boolean isExactMatch(CharSequence variation, HttpRequest<?> request) {
     Set<String> a = normalizeValues(request.headers().getAll(variation));
-    Set<String> b = normalizeValues(responseHeaders.getAll(variation));
+    Set<String> b = normalizeValues(requestHeaders.getAll(variation));
 
     return a.equals(b);
   }

@@ -85,7 +85,7 @@ public class HttpRequestImpl<T> implements HttpRequest<T> {
     }
   }
 
-  protected HttpRequestImpl(HttpRequestImpl<T> other) {
+  private HttpRequestImpl(HttpRequestImpl<T> other) {
     this.client = other.client;
     this.serverAddress = other.serverAddress;
     this.options = other.options;

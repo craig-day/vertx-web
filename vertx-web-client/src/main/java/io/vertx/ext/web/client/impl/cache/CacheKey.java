@@ -15,45 +15,29 @@
  */
 package io.vertx.ext.web.client.impl.cache;
 
-import io.vertx.core.MultiMap;
-import io.vertx.ext.web.client.CachingWebClientOptions;
 import io.vertx.ext.web.client.HttpRequest;
 import io.vertx.ext.web.client.spi.CacheStore;
-import io.vertx.ext.web.client.impl.HttpRequestImpl;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.stream.Collectors;
+import java.util.Objects;
 
 /**
  * A key for a {@link CacheStore} based on a {@link HttpRequest}.
  *
  * @author <a href="mailto:craigday3@gmail.com">Craig Day</a>
  */
-public class CacheKey {
+public class CacheKey extends CacheVariationsKey {
 
-  private final HttpRequestImpl<?> request;
-  private final CachingWebClientOptions options;
+  private final String variations;
 
-  public CacheKey(HttpRequest<?> request, CachingWebClientOptions options) {
-    this.request = (HttpRequestImpl<?>) request;
-    this.options = options;
+  public CacheKey(HttpRequest<?> request, Vary vary) {
+    super(request);
+    this.variations = vary.toString();
   }
 
   @Override
   public String toString() {
-    List<String> keyParts = new ArrayList<>(options.isVaryCachingEnabled() ? 4 : 3);
-
-    keyParts.add(request.host());
-    keyParts.add(Integer.toString(request.port()));
-    keyParts.add(queryString(request.queryParams()));
-
-    if (options.isVaryCachingEnabled()) {
-      keyParts.add(userAgentVariation(request.headers()));
-    }
-
-    String rawKey = String.join("|", keyParts);
+    String rawKey = super.toString() + "|" + variations;
 
     try {
       MessageDigest digest = MessageDigest.getInstance("SHA-256");
@@ -64,15 +48,25 @@ public class CacheKey {
     }
   }
 
-  private String queryString(MultiMap queryParams) {
-    return queryParams.entries()
-      .stream()
-      .map(e -> e.getKey() + "=" + e.getValue())
-      .collect(Collectors.joining("&"));
+  @Override
+  public boolean equals(Object o) {
+    if (this == o) {
+      return true;
+    }
+    if (o == null || getClass() != o.getClass()) {
+      return false;
+    }
+    CacheKey cacheKey = (CacheKey) o;
+    return port == cacheKey.port
+      && host.equals(cacheKey.host)
+      && path.equals(cacheKey.path)
+      && queryString.equals(cacheKey.queryString)
+      && variations.equals(cacheKey.variations);
   }
 
-  private String userAgentVariation(MultiMap headers) {
-    return UserAgent.parse(headers).normalize();
+  @Override
+  public int hashCode() {
+    return Objects.hash(host, port, path, queryString, variations);
   }
 
   private static String bytesToHex(byte[] hash) {

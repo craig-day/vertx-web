@@ -24,7 +24,12 @@ import io.vertx.ext.web.client.HttpResponse;
 import io.vertx.ext.web.client.CachingWebClientOptions;
 import io.vertx.ext.web.client.spi.CacheStore;
 import io.vertx.ext.web.client.impl.HttpRequestImpl;
+import java.util.Collections;
 import java.util.Date;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * HTTP cache manager to process requests and responses and either reply from, or store in a cache.
@@ -35,35 +40,33 @@ public class CacheManager {
 
   private final CacheStore cacheStore;
   private final CachingWebClientOptions options;
+  private final Map<CacheVariationsKey, Set<Vary>> variationsRegistry;
 
   public CacheManager(CacheStore cacheStore, CachingWebClientOptions options) {
     this.cacheStore = cacheStore;
     this.options = options;
+    this.variationsRegistry = new ConcurrentHashMap<>();
   }
 
   public Future<HttpResponse<Buffer>> processRequest(HttpRequest<Buffer> request) {
-    if (!options.isCachingEnabled()) {
-      return request.send();
+    Vary variation = selectVariation(request);
+    if (variation == null) {
+      return request.send().compose(resp -> cacheResponse(request, resp));
     }
 
-    CacheKey key = new CacheKey(request, options);
-
     return cacheStore
-      .get(key)
+      .get(new CacheKey(request, variation))
       .compose(resp -> respondFromCache((HttpRequestImpl<Buffer>) request, resp));
   }
 
   public Future<HttpResponse<Buffer>> processResponse(HttpRequest<Buffer> request, HttpResponse<Buffer> response) {
-    if (!options.isCachingEnabled()) {
-      return Future.succeededFuture(response);
-    }
-
     return processResponse(request, response, false);
   }
 
   private Future<HttpResponse<Buffer>> processResponse(HttpRequest<Buffer> request, HttpResponse<Buffer> response, boolean wasStale) {
     if (wasStale && response.statusCode() == 304) {
       // The cache returned a stale result, but server has confirmed still good. Update cache
+      // TODO: we shouldn't use the new response here, as it may not have a body
       return cacheResponse(request, response).map(response);
     } else if (options.getCachedStatusCodes().contains(response.statusCode())) {
       // Request was successful, attempt to cache response
@@ -74,6 +77,19 @@ public class CacheManager {
     }
   }
 
+  private Vary selectVariation(HttpRequest<?> request) {
+    CacheVariationsKey key = new CacheVariationsKey(request);
+    Set<Vary> possibleVariations = variationsRegistry.getOrDefault(key, Collections.emptySet());
+
+    for (Vary variation : possibleVariations) {
+      if (variation.matchesRequest(request)) {
+        return variation;
+      }
+    }
+
+    return null;
+  }
+
   private Future<HttpResponse<Buffer>> respondFromCache(HttpRequestImpl<Buffer> request, CachedHttpResponse response) {
     if (response == null) {
       return Future.failedFuture("http cache miss");
@@ -82,13 +98,9 @@ public class CacheManager {
     CacheControl cacheControl = response.cacheControl();
 
     if (response.isFresh()) {
-      if (cacheControl.isVarying() && options.isVaryCachingEnabled()) {
-        return handleVaryingCache(request, response);
-      } else {
-        HttpResponse<Buffer> result = response.rehydrate();
-        result.headers().set(HttpHeaders.AGE, DateFormatter.format(new Date(response.age())));
-        return Future.succeededFuture(result);
-      }
+      HttpResponse<Buffer> result = response.rehydrate();
+      result.headers().set(HttpHeaders.AGE, DateFormatter.format(new Date(response.age())));
+      return Future.succeededFuture(result);
     } else {
       return handleStaleCacheResult(request, cacheControl);
     }
@@ -103,32 +115,36 @@ public class CacheManager {
       .compose(updatedResponse -> processResponse(request, updatedResponse, true));
   }
 
-  private Future<HttpResponse<Buffer>> handleVaryingCache(HttpRequestImpl<?> request, CachedHttpResponse response) {
-    if (response.vary().matchesRequest(request)) {
-      return Future.succeededFuture(response.rehydrate());
-    } else {
-      return Future.failedFuture("matching variation not found");
-    }
-  }
-
-  private Future<Void> cacheResponse(HttpRequest<?> request, HttpResponse<Buffer> response) {
+  private Future<HttpResponse<Buffer>> cacheResponse(HttpRequest<?> request, HttpResponse<Buffer> response) {
     CacheControl cacheControl = CacheControl.parse(response.headers());
 
     if (!cacheControl.isCacheable()) {
-      return Future.succeededFuture();
+      return Future.succeededFuture(response);
     }
 
     if (cacheControl.isPrivate() && !options.isPrivateCachingEnabled()) {
-      return Future.succeededFuture();
+      return Future.succeededFuture(response);
     }
 
     if (cacheControl.isVarying() && !options.isVaryCachingEnabled()) {
-      return Future.succeededFuture();
+      return Future.succeededFuture(response);
     }
 
-    CacheKey key = new CacheKey(request, options);
-    CachedHttpResponse cachedResponse = CachedHttpResponse.wrap(response, cacheControl);
+    CacheVariationsKey variationsKey = new CacheVariationsKey(request);
+    Vary variation = new Vary(request.headers(), response.headers());
+    registerVariation(variationsKey, variation);
 
-    return cacheStore.set(key, cachedResponse).mapEmpty();
+    CacheKey key = new CacheKey(request, variation);
+    CachedHttpResponse cachedResponse = CachedHttpResponse.wrap(request, response, cacheControl);
+
+    return cacheStore.set(key, cachedResponse).map(response);
+  }
+
+  private void registerVariation(CacheVariationsKey variationsKey, Vary variation) {
+    Set<Vary> existing = variationsRegistry.getOrDefault(variationsKey, Collections.emptySet());
+    Set<Vary> updated = new HashSet<>(existing);
+
+    updated.add(variation);
+    variationsRegistry.put(variationsKey, updated);
   }
 }

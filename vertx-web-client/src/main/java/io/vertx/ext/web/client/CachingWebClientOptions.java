@@ -29,7 +29,7 @@ public class CachingWebClientOptions extends WebClientOptions {
 
   public static final Set<Integer> DEFAULT_CACHED_STATUS_CODES = buildDefaultStatusCodes();
 
-  private boolean enablePublicCaching = false;
+  private boolean enablePublicCaching = true;
   private boolean enablePrivateCaching = false;
   private boolean enableVaryCaching = false;
   private Set<Integer> cachedStatusCodes = DEFAULT_CACHED_STATUS_CODES;

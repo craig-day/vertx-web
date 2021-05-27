@@ -18,6 +18,7 @@ package io.vertx.ext.web.client.impl.cache;
 import io.vertx.core.MultiMap;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpVersion;
+import io.vertx.ext.web.client.HttpRequest;
 import io.vertx.ext.web.client.HttpResponse;
 import io.vertx.ext.web.client.spi.CacheStore;
 import io.vertx.ext.web.client.impl.HttpResponseImpl;
@@ -26,7 +27,7 @@ import java.io.ObjectInputStream;
 import java.io.Serializable;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.List;
+import java.util.Collections;
 
 /**
  * A serializable object to be stored by a {@link CacheStore}.
@@ -41,63 +42,40 @@ public class CachedHttpResponse implements Serializable {
   private final int statusCode;
   private final String statusMessage;
   private final Buffer body;
-  private final MultiMap headers;
+  private final MultiMap requestHeaders;
+  private final MultiMap responseHeaders;
   private final Instant timestamp;
 
-  transient private final MultiMap trailers;
-  transient private final List<String> cookies;
-  transient private final List<String> redirects;
   transient private CacheControl cacheControl;
   transient private Vary vary;
 
-  static CachedHttpResponse wrap(HttpResponse<?> response) {
-    return new CachedHttpResponse(
-      response.version().name(),
-      response.statusCode(),
-      response.statusMessage(),
-      response.bodyAsBuffer(),
-      response.headers(),
-      response.trailers(),
-      response.cookies(),
-      response.followedRedirects()
-    );
+  static CachedHttpResponse wrap(HttpRequest<?> request, HttpResponse<?> response) {
+    return wrap(request, response, CacheControl.parse(response.headers()));
   }
 
-  static CachedHttpResponse wrap(HttpResponse<?> response, CacheControl cacheControl) {
+  static CachedHttpResponse wrap(HttpRequest<?> request, HttpResponse<?> response, CacheControl cacheControl) {
     return new CachedHttpResponse(
       response.version().name(),
       response.statusCode(),
       response.statusMessage(),
       response.bodyAsBuffer(),
+      request.headers(),
       response.headers(),
-      response.trailers(),
-      response.cookies(),
-      response.followedRedirects(),
       cacheControl
     );
   }
 
   CachedHttpResponse(String version, int statusCode, String statusMessage, Buffer body,
-    MultiMap headers, MultiMap trailers, List<String> cookies,
-    List<String> redirects) {
-    this(version, statusCode, statusMessage, body, headers,
-      trailers, cookies, redirects, CacheControl.parse(headers));
-  }
-
-  CachedHttpResponse(String version, int statusCode, String statusMessage, Buffer body,
-    MultiMap headers, MultiMap trailers, List<String> cookies,
-    List<String> redirects, CacheControl cacheControl) {
+    MultiMap requestHeaders, MultiMap responseHeaders, CacheControl cacheControl) {
     this.version = version;
     this.statusCode = statusCode;
     this.statusMessage = statusMessage;
     this.body = body;
-    this.headers = headers;
+    this.requestHeaders = requestHeaders;
+    this.responseHeaders = responseHeaders;
     this.timestamp = Instant.now(); // TODO: should we look at the Date or Age header instead?
-    this.trailers = trailers;
-    this.cookies = cookies;
-    this.redirects = redirects;
     this.cacheControl = cacheControl;
-    this.vary = new Vary(headers);
+    this.vary = new Vary(requestHeaders, responseHeaders);
   }
 
   public boolean isFresh() {
@@ -108,20 +86,16 @@ public class CachedHttpResponse implements Serializable {
     return Duration.between(timestamp, Instant.now()).getSeconds();
   }
 
-  public MultiMap headers() {
-    return headers;
-  }
-
   public CacheControl cacheControl() {
     if (cacheControl == null) {
-      this.cacheControl = CacheControl.parse(headers);
+      this.cacheControl = CacheControl.parse(responseHeaders);
     }
     return cacheControl;
   }
 
   public Vary vary() {
     if (vary == null) {
-      this.vary = new Vary(headers);
+      this.vary = new Vary(requestHeaders, responseHeaders);
     }
     return vary;
   }
@@ -131,17 +105,17 @@ public class CachedHttpResponse implements Serializable {
       HttpVersion.valueOf(version),
       statusCode,
       statusMessage,
-      headers,
-      trailers,
-      cookies,
+      responseHeaders,
+      MultiMap.caseInsensitiveMultiMap(),
+      Collections.emptyList(),
       body,
-      redirects
+      Collections.emptyList()
     );
   }
 
   private void readObject(ObjectInputStream ois) throws ClassNotFoundException, IOException {
     ois.defaultReadObject();
-    this.cacheControl = CacheControl.parse(headers);
-    this.vary = new Vary(headers);
+    this.cacheControl = CacheControl.parse(responseHeaders);
+    this.vary = new Vary(requestHeaders, responseHeaders);
   }
 }

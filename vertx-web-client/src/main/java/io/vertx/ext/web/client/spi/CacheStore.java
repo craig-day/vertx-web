@@ -18,9 +18,11 @@ package io.vertx.ext.web.client.spi;
 import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
 import io.vertx.core.Handler;
+import io.vertx.core.Vertx;
 import io.vertx.ext.web.client.impl.cache.CacheKey;
 import io.vertx.ext.web.client.impl.cache.CachedHttpResponse;
 import io.vertx.ext.web.client.impl.cache.NoOpCacheStore;
+import io.vertx.ext.web.client.impl.cache.SharedDataCacheStore;
 
 /**
  * An API to store and retrieve HTTP responses.
@@ -39,6 +41,17 @@ public interface CacheStore {
   }
 
   /**
+   * Builds a cache store that uses an {@link io.vertx.core.shareddata.AsyncMap} from
+   * {@link io.vertx.core.shareddata.SharedData}.
+   *
+   * @param vertx the vertx instance
+   * @return the new cache store
+   */
+  static CacheStore sharedDataStore(Vertx vertx) {
+    return new SharedDataCacheStore(vertx);
+  }
+
+  /**
    * Retrieve a cached response.
    *
    * @param key the key to retrieve
@@ -47,16 +60,16 @@ public interface CacheStore {
   Future<CachedHttpResponse> get(CacheKey key);
 
   /**
-   * Store a response in the cache.
+   * Add a response in the cache with the given key.
    *
    * @param key      the key to store the response at
    * @param response the response to store
-   * @return
+   * @return the response
    */
   Future<CachedHttpResponse> set(CacheKey key, CachedHttpResponse response);
 
   /**
-   * Delete an entry from the cache.
+   * Delete a key from the cache.
    *
    * @param key the key to delete
    * @return a future so the API can be composed fluently
@@ -82,7 +95,7 @@ public interface CacheStore {
   }
 
   /**
-   * Store a response in the cache.
+   * Add a response in the cache with the given key.
    *
    * @param key      the key to store the response at
    * @param response the response to store
@@ -94,7 +107,7 @@ public interface CacheStore {
   }
 
   /**
-   * Delete an entry from the cache.
+   * Delete all variations of a key from the cache.
    *
    * @param key     the key to delete
    * @param handler a handler to receive the delete result

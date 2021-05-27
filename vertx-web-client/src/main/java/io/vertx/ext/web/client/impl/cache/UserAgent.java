@@ -47,6 +47,18 @@ public class UserAgent {
     return type;
   }
 
+  @Override
+  public boolean equals(Object o) {
+    if (this == o) {
+      return true;
+    }
+    if (o == null || getClass() != o.getClass()) {
+      return false;
+    }
+    UserAgent userAgent = (UserAgent) o;
+    return type.equals(userAgent.type);
+  }
+
   private static NormalizedType parseHeader(String string) {
     if (string == null) {
       return NormalizedType.DESKTOP;
