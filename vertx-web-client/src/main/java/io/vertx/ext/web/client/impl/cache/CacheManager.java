@@ -60,20 +60,21 @@ public class CacheManager {
   }
 
   public Future<HttpResponse<Buffer>> processResponse(HttpRequest<Buffer> request, HttpResponse<Buffer> response) {
-    return processResponse(request, response, false);
-  }
-
-  private Future<HttpResponse<Buffer>> processResponse(HttpRequest<Buffer> request, HttpResponse<Buffer> response, boolean wasStale) {
-    if (wasStale && response.statusCode() == 304) {
-      // The cache returned a stale result, but server has confirmed still good. Update cache
-      // TODO: we shouldn't use the new response here, as it may not have a body
-      return cacheResponse(request, response).map(response);
-    } else if (options.getCachedStatusCodes().contains(response.statusCode())) {
+    if (options.getCachedStatusCodes().contains(response.statusCode())) {
       // Request was successful, attempt to cache response
       return cacheResponse(request, response).map(response);
     } else {
       // Response is not cacheable, do nothing
       return Future.succeededFuture(response);
+    }
+  }
+
+  private Future<HttpResponse<Buffer>> processResponse(HttpRequest<Buffer> request, HttpResponse<Buffer> response, CachedHttpResponse cachedResponse) {
+    if (response.statusCode() == 304) {
+      // The cache returned a stale result, but server has confirmed still good. Update cache
+      return cacheResponse(request, cachedResponse.rehydrate());
+    } else {
+      return processResponse(request, response);
     }
   }
 
@@ -95,24 +96,22 @@ public class CacheManager {
       return Future.failedFuture("http cache miss");
     }
 
-    CacheControl cacheControl = response.cacheControl();
-
     if (response.isFresh()) {
       HttpResponse<Buffer> result = response.rehydrate();
       result.headers().set(HttpHeaders.AGE, DateFormatter.format(new Date(response.age())));
       return Future.succeededFuture(result);
     } else {
-      return handleStaleCacheResult(request, cacheControl);
+      return handleStaleCacheResult(request, response);
     }
   }
 
-  private Future<HttpResponse<Buffer>> handleStaleCacheResult(HttpRequestImpl<Buffer> request, CacheControl cacheControl) {
+  private Future<HttpResponse<Buffer>> handleStaleCacheResult(HttpRequestImpl<Buffer> request, CachedHttpResponse response) {
     // We could also add support for stale-while-revalidate and stale-if-error here if desired
-    request.headers().set(HttpHeaders.IF_NONE_MATCH, cacheControl.etag());
+    request.headers().set(HttpHeaders.IF_NONE_MATCH, response.cacheControl().etag());
     // TODO: should we delete the stale response from the cache?
     return request
       .send()
-      .compose(updatedResponse -> processResponse(request, updatedResponse, true));
+      .compose(updatedResponse -> processResponse(request, updatedResponse, response));
   }
 
   private Future<HttpResponse<Buffer>> cacheResponse(HttpRequest<?> request, HttpResponse<Buffer> response) {

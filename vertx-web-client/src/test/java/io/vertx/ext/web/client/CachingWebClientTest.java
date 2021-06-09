@@ -445,6 +445,34 @@ public class CachingWebClientTest {
   }
 
   @Test
+  public void test304NotModifiedResponse(TestContext context) {
+    Async primer = context.async();
+    Async waiter = context.async();
+
+    startMockServer(context, req -> {
+      req.response().headers().set(HttpHeaders.CACHE_CONTROL, "public, max-age=1");
+
+      if (primer.isCompleted()) {
+        req.response().setStatusCode(304);
+        req.response().end();
+      } else {
+        req.response().setStatusCode(200);
+        req.response().end(UUID.randomUUID().toString(), v -> primer.complete());
+      }
+    });
+
+    String body1 = executeGetBlocking(context);
+    primer.await();
+
+    vertx.setTimer(2000L, l -> waiter.complete());
+    waiter.await();
+
+    String body2 = executeGetBlocking(context);
+
+    context.assertEquals(body1, body2);
+  }
+
+  @Test
   public void testMatchingPaths(TestContext context) {
     startMockServer(context, "public, max-age=300");
 
