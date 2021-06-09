@@ -16,7 +16,6 @@
 package io.vertx.ext.web.client;
 
 import io.vertx.codegen.annotations.DataObject;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
@@ -89,13 +88,20 @@ public class CachingWebClientOptions extends WebClientOptions {
   }
 
   /**
+   * @return the set of status codes to consider cacheable.
+   */
+  public Set<Integer> getCachedStatusCodes() {
+    return cachedStatusCodes;
+  }
+
+  /**
    * Configure the status codes that can be cached.
    *
    * @param codes the cacheable status code numbers
    * @return a reference to this, so the API can be used fluently
    */
-  public CachingWebClientOptions setCachedStatusCodes(Collection<Integer> codes) {
-    this.cachedStatusCodes = new HashSet<>(codes);
+  public CachingWebClientOptions setCachedStatusCodes(Set<Integer> codes) {
+    this.cachedStatusCodes = codes;
     return this;
   }
 
@@ -119,13 +125,6 @@ public class CachingWebClientOptions extends WebClientOptions {
   public CachingWebClientOptions removeCachedStatusCode(int code) {
     this.cachedStatusCodes.remove(code);
     return this;
-  }
-
-  /**
-   * @return the set of status codes to consider cacheable.
-   */
-  public Set<Integer> getCachedStatusCodes() {
-    return cachedStatusCodes;
   }
 
   /**
