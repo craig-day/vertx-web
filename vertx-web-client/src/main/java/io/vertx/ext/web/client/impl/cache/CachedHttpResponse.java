@@ -82,6 +82,14 @@ public class CachedHttpResponse implements Serializable {
     return age() <= cacheControl().maxAge();
   }
 
+  public boolean useWhileRevalidate() {
+    long duration = cacheControl()
+      .getTimeDirectives()
+      .getOrDefault(CacheControlDirectives.STALE_WHILE_REVALIDATE, 0L);
+
+    return age() <= duration;
+  }
+
   public long age() {
     return Duration.between(timestamp, Instant.now()).getSeconds();
   }

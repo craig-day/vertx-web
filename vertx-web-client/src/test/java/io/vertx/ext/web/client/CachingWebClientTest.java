@@ -473,6 +473,55 @@ public class CachingWebClientTest {
   }
 
   @Test
+  public void testStaleWhileRevalidate(TestContext context) {
+    startMockServer(context, "public, max-age=1, stale-while-revalidate=2");
+
+    Async waiter1 = context.async();
+    Async waiter2 = context.async();
+
+    String body1 = executeGetBlocking(context);
+
+    vertx.setTimer(2000, l -> waiter1.complete());
+    waiter1.await();
+
+    String body2 = executeGetBlocking(context);
+
+    vertx.setTimer(1000, l -> waiter2.complete());
+    waiter2.await();
+
+    String body3 = executeGetBlocking(context);
+
+    context.assertEquals(body1, body2);
+    context.assertNotEquals(body1, body3);
+  }
+
+  @Test
+  public void testStaleWhileRevalidateExpired(TestContext context) {
+    startMockServer(context, "public, max-age=1, stale-while-revalidate=1");
+
+    Async waiter1 = context.async();
+    Async waiter2 = context.async();
+
+    String body1 = executeGetBlocking(context);
+
+    // max-age 1 + stale-while-revalidate 1 + leeway 1 => 3s
+    vertx.setTimer(3000, l -> waiter1.complete());
+    waiter1.await();
+
+    String body2 = executeGetBlocking(context);
+
+    // max-age 1 + stale-while-revalidate 1 + leeway 1 => 3s
+    vertx.setTimer(3000, l -> waiter2.complete());
+    waiter2.await();
+
+    String body3 = executeGetBlocking(context);
+
+    context.assertNotEquals(body1, body2);
+    context.assertNotEquals(body1, body3);
+    context.assertNotEquals(body2, body3);
+  }
+
+  @Test
   public void testMatchingPaths(TestContext context) {
     startMockServer(context, "public, max-age=300");
 

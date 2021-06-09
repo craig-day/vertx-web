@@ -17,6 +17,7 @@ package io.vertx.ext.web.client.impl.cache;
 
 import io.netty.handler.codec.DateFormatter;
 import io.vertx.core.Future;
+import io.vertx.core.Promise;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpHeaders;
 import io.vertx.ext.web.client.HttpRequest;
@@ -24,6 +25,7 @@ import io.vertx.ext.web.client.HttpResponse;
 import io.vertx.ext.web.client.CachingWebClientOptions;
 import io.vertx.ext.web.client.spi.CacheStore;
 import io.vertx.ext.web.client.impl.HttpRequestImpl;
+import java.time.Instant;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashSet;
@@ -69,15 +71,6 @@ public class CacheManager {
     }
   }
 
-  private Future<HttpResponse<Buffer>> processResponse(HttpRequest<Buffer> request, HttpResponse<Buffer> response, CachedHttpResponse cachedResponse) {
-    if (response.statusCode() == 304) {
-      // The cache returned a stale result, but server has confirmed still good. Update cache
-      return cacheResponse(request, cachedResponse.rehydrate());
-    } else {
-      return processResponse(request, response);
-    }
-  }
-
   private Vary selectVariation(HttpRequest<?> request) {
     CacheVariationsKey key = new CacheVariationsKey(request);
     Set<Vary> possibleVariations = variationsRegistry.getOrDefault(key, Collections.emptySet());
@@ -96,22 +89,38 @@ public class CacheManager {
       return Future.failedFuture("http cache miss");
     }
 
+    HttpResponse<Buffer> result = response.rehydrate();
+    result.headers().set(HttpHeaders.AGE, Long.toString(response.age()));
+
     if (response.isFresh()) {
-      HttpResponse<Buffer> result = response.rehydrate();
-      result.headers().set(HttpHeaders.AGE, DateFormatter.format(new Date(response.age())));
+      // Response is current, reply with it immediately
+      return Future.succeededFuture(result);
+    } else if (response.useWhileRevalidate()) {
+      // Send off a request to revalidate the cache but don't want for a response, just respond
+      // immediately with the cached value.
+      handleStaleCacheResult(request, response);
       return Future.succeededFuture(result);
     } else {
+      // Can't use the response as-is, fetch updated information before responding
       return handleStaleCacheResult(request, response);
     }
   }
 
   private Future<HttpResponse<Buffer>> handleStaleCacheResult(HttpRequestImpl<Buffer> request, CachedHttpResponse response) {
-    // We could also add support for stale-while-revalidate and stale-if-error here if desired
     request.headers().set(HttpHeaders.IF_NONE_MATCH, response.cacheControl().etag());
-    // TODO: should we delete the stale response from the cache?
+
     return request
       .send()
-      .compose(updatedResponse -> processResponse(request, updatedResponse, response));
+      .compose(updatedResponse -> processRevalidationResponse(request, updatedResponse, response));
+  }
+
+  private Future<HttpResponse<Buffer>> processRevalidationResponse(HttpRequest<Buffer> request, HttpResponse<Buffer> response, CachedHttpResponse cachedResponse) {
+    if (response.statusCode() == 304) {
+      // The cache returned a stale result, but server has confirmed still good. Update cache
+      return cacheResponse(request, cachedResponse.rehydrate());
+    } else {
+      return processResponse(request, response);
+    }
   }
 
   private Future<HttpResponse<Buffer>> cacheResponse(HttpRequest<?> request, HttpResponse<Buffer> response) {

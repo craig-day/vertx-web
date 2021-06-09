@@ -33,9 +33,6 @@ import java.util.Set;
  */
 public class CacheControl {
 
-  private static final String SHARED_MAX_AGE = "s-maxage";
-  private static final String MAX_AGE = "max-age";
-
   private final Set<String> directives;
   private final Map<String, Long> timeDirectives;
   private final Instant expires;
@@ -70,6 +67,14 @@ public class CacheControl {
     // the Cache-Control header before we can compute max age.
     parseAllCacheControl(headers);
     this.maxAge = computeMaxAge();
+  }
+
+  public Set<String> getDirectives() {
+    return directives;
+  }
+
+  public Map<String, Long> getTimeDirectives() {
+    return timeDirectives;
   }
 
   public String etag() {
@@ -120,10 +125,10 @@ public class CacheControl {
   }
 
   private long computeMaxAge() {
-    if (!isPrivate() && timeDirectives.containsKey(SHARED_MAX_AGE)) {
-      return timeDirectives.get(SHARED_MAX_AGE);
-    } else if (timeDirectives.containsKey(MAX_AGE)) {
-      return timeDirectives.get(MAX_AGE);
+    if (!isPrivate() && timeDirectives.containsKey(CacheControlDirectives.SHARED_MAX_AGE)) {
+      return timeDirectives.get(CacheControlDirectives.SHARED_MAX_AGE);
+    } else if (timeDirectives.containsKey(CacheControlDirectives.MAX_AGE)) {
+      return timeDirectives.get(CacheControlDirectives.MAX_AGE);
     } else if (expires != null) {
       return Duration.between(date, expires).getSeconds();
     } else {
