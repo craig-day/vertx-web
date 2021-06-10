@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import org.junit.After;
@@ -250,8 +251,32 @@ public class CachingWebClientTest {
 
   @Test
   public void testNoCache(TestContext context) {
-    startMockServer(context, "no-cache");
-    assertNotCached(context);
+    final AtomicBoolean replyWith304 = new AtomicBoolean(false);
+
+    startMockServer(context, req -> {
+      req.response().headers().set(HttpHeaders.CACHE_CONTROL, "no-cache");
+
+      if (replyWith304.get()) {
+        req.response().setStatusCode(304);
+        req.response().end();
+      } else {
+        req.response().end(UUID.randomUUID().toString());
+      }
+    });
+
+    String body1 = executeGetBlocking(context); // Initial request
+    String body2 = executeGetBlocking(context); // Another request, reply with new value
+    replyWith304.compareAndSet(false, true);
+    String body3 = executeGetBlocking(context); // Another request, server says cache is valid
+    replyWith304.compareAndSet(true, false);
+    String body4 = executeGetBlocking(context); // Another request, reply with new value
+
+    context.assertNotEquals(body1, body2);
+    context.assertNotEquals(body1, body3);
+    context.assertNotEquals(body1, body4);
+    context.assertEquals(body2, body3);
+    context.assertNotEquals(body2, body4);
+    context.assertNotEquals(body3, body4);
   }
 
   // Cache-Control: public

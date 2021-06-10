@@ -98,9 +98,7 @@ public class CacheControl {
   }
 
   public boolean isCacheable() {
-    if (directives.contains("no-store") || directives.contains("no-cache")) {
-      // TODO: no-cache should really store the response and validate with the server each time, but
-      // we just treat it as uncacheable for safety here.
+    if (directives.contains(CacheControlDirectives.NO_STORE)) {
       return false;
     }
     if ("*".equals(vary)) {
@@ -113,15 +111,23 @@ public class CacheControl {
   public boolean isPublic() {
     // Technically, you cannot say `Cache-Control: public, private` but on the chance that we do,
     // default to private which is considered safer and more strict.
-    return directives.contains("public") && !isPrivate();
+    return directives.contains(CacheControlDirectives.PUBLIC) && !isPrivate();
   }
 
   public boolean isPrivate() {
-    return directives.contains("private");
+    return directives.contains(CacheControlDirectives.PRIVATE);
   }
 
   public boolean isVarying() {
     return !variations().isEmpty();
+  }
+
+  public boolean noStore() {
+    return directives.contains(CacheControlDirectives.NO_STORE);
+  }
+
+  public boolean noCache() {
+    return !noStore() && directives.contains(CacheControlDirectives.NO_CACHE);
   }
 
   private long computeMaxAge() {

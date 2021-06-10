@@ -47,7 +47,6 @@ public class CachedHttpResponse implements Serializable {
   private final Instant timestamp;
 
   transient private CacheControl cacheControl;
-  transient private Vary vary;
 
   static CachedHttpResponse wrap(HttpRequest<?> request, HttpResponse<?> response) {
     return wrap(request, response, CacheControl.parse(response.headers()));
@@ -75,7 +74,6 @@ public class CachedHttpResponse implements Serializable {
     this.responseHeaders = responseHeaders;
     this.timestamp = Instant.now(); // TODO: should we look at the Date or Age header instead?
     this.cacheControl = cacheControl;
-    this.vary = new Vary(requestHeaders, responseHeaders);
   }
 
   public boolean isFresh() {
@@ -101,13 +99,6 @@ public class CachedHttpResponse implements Serializable {
     return cacheControl;
   }
 
-  public Vary vary() {
-    if (vary == null) {
-      this.vary = new Vary(requestHeaders, responseHeaders);
-    }
-    return vary;
-  }
-
   public HttpResponse<Buffer> rehydrate() {
     return new HttpResponseImpl<>(
       HttpVersion.valueOf(version),
@@ -124,6 +115,5 @@ public class CachedHttpResponse implements Serializable {
   private void readObject(ObjectInputStream ois) throws ClassNotFoundException, IOException {
     ois.defaultReadObject();
     this.cacheControl = CacheControl.parse(responseHeaders);
-    this.vary = new Vary(requestHeaders, responseHeaders);
   }
 }

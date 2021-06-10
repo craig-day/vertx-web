@@ -92,7 +92,10 @@ public class CacheManager {
     HttpResponse<Buffer> result = response.rehydrate();
     result.headers().set(HttpHeaders.AGE, Long.toString(response.age()));
 
-    if (response.isFresh()) {
+    if (response.cacheControl().noCache()) {
+      // We must validate with the server before releasing the cached data
+      return handleStaleCacheResult(request, response);
+    } else if (response.isFresh()) {
       // Response is current, reply with it immediately
       return Future.succeededFuture(result);
     } else if (response.useWhileRevalidate()) {
