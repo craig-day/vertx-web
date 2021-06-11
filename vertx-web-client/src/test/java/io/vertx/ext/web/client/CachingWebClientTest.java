@@ -547,6 +547,60 @@ public class CachingWebClientTest {
   }
 
   @Test
+  public void testStaleIfError(TestContext context) {
+    Async waiter = context.async();
+
+    startMockServer(context, req -> {
+      req.response().headers().set(HttpHeaders.CACHE_CONTROL, "public, max-age=1, stale-if-error=2");
+      if (waiter.isCompleted()) {
+        req.response().setStatusCode(503);
+        req.response().end();
+      }
+    });
+
+    String body1 = executeGetBlocking(context);
+    vertx.setTimer(2000L, l -> waiter.complete());
+    waiter.await();
+    String body2 = executeGetBlocking(context);
+
+    context.assertEquals(body1, body2);
+  }
+
+  @Test
+  public void testStaleIfErrorExpired(TestContext context) {
+    Async waiter1 = context.async();
+    Async waiter2 = context.async();
+    Async request = context.async();
+    AtomicReference<HttpResponse<Buffer>> response = new AtomicReference<>();
+
+    startMockServer(context, req -> {
+      req.response().headers().set(HttpHeaders.CACHE_CONTROL, "public, max-age=1, stale-if-error=2");
+      if (waiter1.isCompleted()) {
+        req.response().setStatusCode(503);
+        req.response().end();
+      }
+    });
+
+    String body1 = executeGetBlocking(context);
+    vertx.setTimer(2000L, l -> waiter1.complete());
+    waiter1.await();
+
+    String body2 = executeGetBlocking(context);
+    vertx.setTimer(3000L, l -> waiter2.complete());
+    waiter2.await();
+
+    defaultClient.get("localhost", "/").send(context.asyncAssertSuccess(resp -> {
+      response.set(resp);
+      request.complete();
+    }));
+    request.await();
+
+    context.assertEquals(body1, body2);
+    context.assertNull(response.get().bodyAsString());
+    context.assertEquals(response.get().statusCode(), 503);
+  }
+
+  @Test
   public void testMatchingPaths(TestContext context) {
     startMockServer(context, "public, max-age=300");
 

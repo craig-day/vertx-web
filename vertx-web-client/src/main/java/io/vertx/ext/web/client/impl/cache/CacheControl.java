@@ -77,11 +77,11 @@ public class CacheControl {
     return timeDirectives;
   }
 
-  public String etag() {
+  public String getEtag() {
     return etag;
   }
 
-  public long maxAge() {
+  public long getMaxAge() {
     return maxAge;
   }
 

@@ -77,15 +77,15 @@ public class CachedHttpResponse implements Serializable {
   }
 
   public boolean isFresh() {
-    return age() <= cacheControl().maxAge();
+    return age() <= cacheControl().getMaxAge();
   }
 
-  public boolean useWhileRevalidate() {
-    long duration = cacheControl()
-      .getTimeDirectives()
-      .getOrDefault(CacheControlDirectives.STALE_WHILE_REVALIDATE, 0L);
+  public boolean useStaleWhileRevalidate() {
+    return useStale(CacheControlDirectives.STALE_WHILE_REVALIDATE);
+  }
 
-    return age() <= duration;
+  public boolean useStaleIfError() {
+    return useStale(CacheControlDirectives.STALE_IF_ERROR);
   }
 
   public long age() {
@@ -110,6 +110,16 @@ public class CachedHttpResponse implements Serializable {
       body,
       Collections.emptyList()
     );
+  }
+
+  private boolean useStale(String directive) {
+    long secondsStale = Math.max(0L, age() - cacheControl().getMaxAge());
+
+    long maxSecondsStale = cacheControl()
+      .getTimeDirectives()
+      .getOrDefault(directive, 0L);
+
+    return secondsStale <= maxSecondsStale;
   }
 
   private void readObject(ObjectInputStream ois) throws ClassNotFoundException, IOException {
