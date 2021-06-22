@@ -17,11 +17,11 @@ package io.vertx.ext.web.client;
 
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpClient;
+import io.vertx.ext.web.client.impl.CachingWebClientImpl;
+import io.vertx.ext.web.client.impl.WebClientBase;
+import io.vertx.ext.web.client.impl.cache.CacheManager;
 import io.vertx.ext.web.client.impl.cache.SharedDataCacheStore;
 import io.vertx.ext.web.client.spi.CacheStore;
-import io.vertx.ext.web.client.impl.WebClientBase;
-import io.vertx.ext.web.client.impl.CachingWebClientImpl;
-import io.vertx.ext.web.client.impl.cache.CacheManager;
 
 /**
  * An asynchronous cache aware HTTP / HTTP/2 client called {@code CachingWebClient}.
@@ -127,7 +127,7 @@ public interface CachingWebClient {
    */
   static WebClient create(WebClient webClient, CacheStore cacheStore, CachingWebClientOptions options) {
     CacheManager cacheManager = new CacheManager(cacheStore, options);
-    return new CachingWebClientImpl((WebClientBase) webClient, cacheManager, options);
+    return new CachingWebClientImpl((WebClientBase) webClient, cacheManager);
   }
 
   /**

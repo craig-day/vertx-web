@@ -15,12 +15,7 @@
  */
 package io.vertx.ext.web.client.impl;
 
-import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpClient;
-import io.vertx.core.http.HttpMethod;
-import io.vertx.core.http.RequestOptions;
-import io.vertx.core.net.SocketAddress;
-import io.vertx.ext.web.client.HttpRequest;
 import io.vertx.ext.web.client.CachingWebClientOptions;
 import io.vertx.ext.web.client.impl.cache.CacheManager;
 
@@ -29,73 +24,13 @@ import io.vertx.ext.web.client.impl.cache.CacheManager;
  */
 public class CachingWebClientImpl extends WebClientBase {
 
-  private final CacheManager cacheManager;
-  private final CachingWebClientOptions options;
-
   public CachingWebClientImpl(HttpClient client, CacheManager cacheManager, CachingWebClientOptions options) {
     super(client, options);
-    this.cacheManager = cacheManager;
-    this.options = options;
+    addInterceptor(new CachingInterceptor(cacheManager));
   }
 
-  public CachingWebClientImpl(WebClientBase webClient, CacheManager cacheManager, CachingWebClientOptions options) {
+  public CachingWebClientImpl(WebClientBase webClient, CacheManager cacheManager) {
     super(webClient);
-    this.cacheManager = cacheManager;
-    this.options = options;
-  }
-
-  @Override
-  public HttpRequest<Buffer> request(HttpMethod method, String requestURI) {
-    return request(method, (SocketAddress) null, requestURI);
-  }
-
-  @Override
-  public HttpRequest<Buffer> request(HttpMethod method, SocketAddress serverAddress, String requestURI) {
-    HttpRequest<Buffer> delegate = super.request(method, serverAddress, requestURI);
-    return CachedHttpRequestImpl.wrap(delegate, cacheManager, options);
-  }
-
-  @Override
-  public HttpRequest<Buffer> request(HttpMethod method, RequestOptions requestOptions) {
-    return request(method, null, requestOptions);
-  }
-
-  @Override
-  public HttpRequest<Buffer> request(HttpMethod method, SocketAddress serverAddress, RequestOptions requestOptions) {
-    HttpRequest<Buffer> delegate = super.request(method, serverAddress, requestOptions);
-    return CachedHttpRequestImpl.wrap(delegate, cacheManager, options);
-  }
-
-  @Override
-  public HttpRequest<Buffer> request(HttpMethod method, String host, String requestURI) {
-    return request(method, null, host, requestURI);
-  }
-
-  @Override
-  public HttpRequest<Buffer> request(HttpMethod method, SocketAddress serverAddress, String host, String requestURI) {
-    HttpRequest<Buffer> delegate = super.request(method, serverAddress, host, requestURI);
-    return CachedHttpRequestImpl.wrap(delegate, cacheManager, options);
-  }
-
-  @Override
-  public HttpRequest<Buffer> request(HttpMethod method, int port, String host, String requestURI) {
-    return request(method, null, port, host, requestURI);
-  }
-
-  @Override
-  public HttpRequest<Buffer> request(HttpMethod method, SocketAddress serverAddress, int port, String host, String requestURI) {
-    HttpRequest<Buffer> delegate = super.request(method, serverAddress, port, host, requestURI);
-    return CachedHttpRequestImpl.wrap(delegate, cacheManager, options);
-  }
-
-  @Override
-  public HttpRequest<Buffer> requestAbs(HttpMethod method, String surl) {
-    return requestAbs(method, null, surl);
-  }
-
-  @Override
-  public HttpRequest<Buffer> requestAbs(HttpMethod method, SocketAddress serverAddress, String surl) {
-    HttpRequest<Buffer> delegate = super.requestAbs(method, serverAddress, surl);
-    return CachedHttpRequestImpl.wrap(delegate, cacheManager, options);
+    addInterceptor(new CachingInterceptor(cacheManager));
   }
 }

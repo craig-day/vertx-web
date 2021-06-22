@@ -15,9 +15,6 @@
  */
 package io.vertx.ext.web.client.impl.cache;
 
-import io.vertx.codegen.annotations.VertxGen;
-
-@VertxGen
 public interface CacheControlDirectives {
 
   String PUBLIC = "public";
