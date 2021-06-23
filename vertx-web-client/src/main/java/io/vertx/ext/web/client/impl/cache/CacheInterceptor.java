@@ -39,6 +39,8 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class CacheInterceptor implements Handler<HttpContext<?>> {
 
+  private static final String DISPATCH = "cache.dispatch";
+
   private final CacheStore cacheStore;
   private final CachingWebClientOptions options;
   private final Map<CacheVariationsKey, Set<Vary>> variationsRegistry;
@@ -87,7 +89,8 @@ public class CacheInterceptor implements Handler<HttpContext<?>> {
       .compose(cached -> respondFromCache(requestImpl, cached))
       .onComplete(ar -> {
         if (ar.succeeded()) {
-          context.sendResponse(ar.result());
+          context.set(DISPATCH, true);
+          context.dispatchResponse(ar.result());
         } else {
           context.next();
         }
@@ -95,12 +98,15 @@ public class CacheInterceptor implements Handler<HttpContext<?>> {
   }
 
   private void handleDispatchResponse(HttpContext<Buffer> context) {
+    Boolean isCacheDispatch = context.get(DISPATCH);
+
+    if (isCacheDispatch != null && isCacheDispatch) {
+      context.next();
+      return;
+    }
+
     processResponse(context.request(), context.response(), null).onComplete(ar -> {
-      if (ar.succeeded()) {
-        context.sendResponse(ar.result());
-      } else {
-        context.next();
-      }
+      context.next();
     });
   }
 

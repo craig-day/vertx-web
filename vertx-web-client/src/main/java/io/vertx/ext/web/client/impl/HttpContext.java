@@ -257,24 +257,12 @@ public class HttpContext<T> {
    * <ul>
    *   <li>Create the {@link HttpResponse}</li>
    *   <li>Traverse the interceptor chain</li>
-   *   <li>Execute the {@link ClientPhase#SEND_RESPONSE} phase</li>
+   *   <li>Deliver the response to the response handler</li>
    * </ul>
    */
   public void dispatchResponse(HttpResponse<T> response) {
     this.response = response;
     fire(ClientPhase.DISPATCH_RESPONSE);
-  }
-
-  /**
-   * Send the HTTP response, this executes the {@link ClientPhase#SEND_RESPONSE} phase:
-   * <ul>
-   *   <li>Traverse the interceptor chain</li>
-   *   <li>Deliver the response to the response handler</li>
-   * </ul>
-   */
-  public void sendResponse(HttpResponse<T> response) {
-    this.response = response;
-    fire(ClientPhase.SEND_RESPONSE);
   }
 
   /**
@@ -369,9 +357,6 @@ public class HttpContext<T> {
       case DISPATCH_RESPONSE:
         handleDispatchResponse();
         break;
-      case SEND_RESPONSE:
-        handleSendResponse();
-        break;
       case FAILURE:
         handleFailure();
         break;
@@ -383,10 +368,6 @@ public class HttpContext<T> {
   }
 
   private void handleDispatchResponse() {
-    sendResponse(response);
-  }
-
-  private void handleSendResponse() {
     handler.handle(Future.succeededFuture(response));
   }
 
