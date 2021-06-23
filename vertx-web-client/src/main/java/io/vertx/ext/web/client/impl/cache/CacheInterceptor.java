@@ -152,7 +152,7 @@ public class CacheInterceptor implements Handler<HttpContext<?>> {
     }
   }
 
-  private Future<HttpResponse<Buffer>> respondFromCache(HttpContext<?> context, CachedHttpResponse response) {
+  private Future<HttpResponse<Buffer>> respondFromCache(HttpContext<Buffer> context, CachedHttpResponse response) {
     if (response == null) {
       return Future.failedFuture("cache miss");
     }
@@ -169,8 +169,8 @@ public class CacheInterceptor implements Handler<HttpContext<?>> {
     } else if (response.useStaleWhileRevalidate()) {
       // Send off a request to revalidate the cache but don't want for a response, just respond
       // immediately with the cached value.
-      revalidateAsync(context, response);
-      return Future.failedFuture("TODO");
+      context.clientRequest().send();
+      return Future.succeededFuture(result);
     } else {
       // Can't use the response as-is, fetch updated information before responding
       return revalidate(context, response);
@@ -182,10 +182,6 @@ public class CacheInterceptor implements Handler<HttpContext<?>> {
 
     context.set(REVALIDATION_RESPONSE, response);
     return Future.failedFuture("revalidation needed");
-  }
-
-  private void revalidateAsync(HttpContext<?> context, CachedHttpResponse response) {
-    // TODO: can we clone the context and then send it off but continue this copy?
   }
 
   private Future<HttpResponse<Buffer>> processRevalidationResponse(HttpContext<Buffer> context, CachedHttpResponse cachedResponse) {

@@ -28,7 +28,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import org.junit.After;
 import org.junit.Before;
-import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
@@ -499,7 +498,6 @@ public class CachingWebClientTest {
   }
 
   @Test
-  @Ignore("Need to figure out how to send revalidation request and respond at the same time")
   public void testStaleWhileRevalidate(TestContext context) {
     startMockServer(context, "public, max-age=1, stale-while-revalidate=2");
 
@@ -508,12 +506,14 @@ public class CachingWebClientTest {
 
     String body1 = executeGetBlocking(context);
 
+    // Wait > max-age but < stale-while-revalidate
     vertx.setTimer(2000, l -> waiter1.complete());
     waiter1.await();
 
     String body2 = executeGetBlocking(context);
 
-    vertx.setTimer(1000, l -> waiter2.complete());
+    // Wait > max-age + stale-while-revalidate but account for already waited
+    vertx.setTimer(2000, l -> waiter2.complete());
     waiter2.await();
 
     String body3 = executeGetBlocking(context);
