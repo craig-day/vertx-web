@@ -50,6 +50,11 @@ public enum ClientPhase {
   DISPATCH_RESPONSE,
 
   /**
+   * The {@link HttpContext#response()} has been dispatched and will be sent to the handler.
+   */
+  SEND_RESPONSE,
+
+  /**
    * It failed.
    */
   FAILURE

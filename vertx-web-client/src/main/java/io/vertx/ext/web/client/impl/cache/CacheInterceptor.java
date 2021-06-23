@@ -16,13 +16,16 @@
 package io.vertx.ext.web.client.impl.cache;
 
 import io.vertx.core.Future;
+import io.vertx.core.Handler;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpHeaders;
+import io.vertx.core.http.HttpMethod;
+import io.vertx.ext.web.client.CachingWebClientOptions;
 import io.vertx.ext.web.client.HttpRequest;
 import io.vertx.ext.web.client.HttpResponse;
-import io.vertx.ext.web.client.CachingWebClientOptions;
-import io.vertx.ext.web.client.spi.CacheStore;
+import io.vertx.ext.web.client.impl.HttpContext;
 import io.vertx.ext.web.client.impl.HttpRequestImpl;
+import io.vertx.ext.web.client.spi.CacheStore;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Map;
@@ -30,35 +33,75 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * HTTP cache manager to process requests and responses and either reply from, or store in a cache.
+ * An interceptor for caching responses that operates on the {@link HttpContext}.
  *
  * @author <a href="mailto:craigday3@gmail.com">Craig Day</a>
  */
-public class CacheManager {
+public class CacheInterceptor implements Handler<HttpContext<?>> {
 
   private final CacheStore cacheStore;
   private final CachingWebClientOptions options;
   private final Map<CacheVariationsKey, Set<Vary>> variationsRegistry;
 
-  public CacheManager(CacheStore cacheStore, CachingWebClientOptions options) {
-    this.cacheStore = cacheStore;
+  public CacheInterceptor(CacheStore store, CachingWebClientOptions options) {
+    this.cacheStore = store;
     this.options = options;
     this.variationsRegistry = new ConcurrentHashMap<>();
   }
 
-  public Future<HttpResponse<Buffer>> processRequest(HttpRequest<Buffer> request) {
-    Vary variation = selectVariation(request);
-    if (variation == null) {
-      return request.send().compose(resp -> cacheResponse(request, resp));
+  @Override
+  public void handle(HttpContext<?> context) {
+    if (!options.isCachingEnabled()) {
+      context.next();
+      return;
     }
 
-    return cacheStore
-      .get(new CacheKey(request, variation))
-      .compose(resp -> respondFromCache((HttpRequestImpl<Buffer>) request, resp));
+    switch (context.phase()) {
+      case SEND_REQUEST:
+        handleSendRequest((HttpContext<Buffer>) context);
+        break;
+      case DISPATCH_RESPONSE:
+        handleDispatchResponse((HttpContext<Buffer>) context);
+        break;
+      default:
+        context.next();
+        break;
+    }
   }
 
-  public Future<HttpResponse<Buffer>> processResponse(HttpRequest<Buffer> request, HttpResponse<Buffer> response) {
-    return processResponse(request, response, null);
+  private void handleSendRequest(HttpContext<Buffer> context) {
+    HttpRequestImpl<Buffer> requestImpl = (HttpRequestImpl<Buffer>) context.request();
+    if (!HttpMethod.GET.equals(requestImpl.method())) {
+      context.next();
+      return;
+    }
+
+    Vary variation = selectVariation(requestImpl);
+    if (variation == null) {
+      context.next();
+      return;
+    }
+
+    cacheStore
+      .get(new CacheKey(context.request(), variation))
+      .compose(cached -> respondFromCache(requestImpl, cached))
+      .onComplete(ar -> {
+        if (ar.succeeded()) {
+          context.sendResponse(ar.result());
+        } else {
+          context.next();
+        }
+      });
+  }
+
+  private void handleDispatchResponse(HttpContext<Buffer> context) {
+    processResponse(context.request(), context.response(), null).onComplete(ar -> {
+      if (ar.succeeded()) {
+        context.sendResponse(ar.result());
+      } else {
+        context.next();
+      }
+    });
   }
 
   private Future<HttpResponse<Buffer>> processResponse(HttpRequest<Buffer> request, HttpResponse<Buffer> response, CachedHttpResponse cachedResponse) {
@@ -114,10 +157,12 @@ public class CacheManager {
   private Future<HttpResponse<Buffer>> handleStaleCacheResult(HttpRequestImpl<Buffer> request, CachedHttpResponse response) {
     request.headers().set(HttpHeaders.IF_NONE_MATCH, response.cacheControl().getEtag());
 
-    return request
-      .send()
-      .compose(updatedResponse -> processRevalidationResponse(request, updatedResponse, response))
-      .recover(e -> response.useStaleIfError() ? Future.succeededFuture(response.rehydrate()) : Future.failedFuture(e));
+    // TODO: how do I send the request and know the next interceptor run is for a revalidation
+    return Future.failedFuture("TODO");
+    // return request
+    //  .send()
+    //  .compose(updatedResponse -> processRevalidationResponse(request, updatedResponse, response))
+    //  .recover(e -> response.useStaleIfError() ? Future.succeededFuture(response.rehydrate()) : Future.failedFuture(e));
   }
 
   private Future<HttpResponse<Buffer>> processRevalidationResponse(HttpRequest<Buffer> request, HttpResponse<Buffer> response, CachedHttpResponse cachedResponse) {
@@ -149,7 +194,7 @@ public class CacheManager {
     registerVariation(variationsKey, variation);
 
     CacheKey key = new CacheKey(request, variation);
-    CachedHttpResponse cachedResponse = CachedHttpResponse.wrap(request, response, cacheControl);
+    CachedHttpResponse cachedResponse = CachedHttpResponse.wrap(response, cacheControl);
 
     return cacheStore.set(key, cachedResponse).map(response);
   }

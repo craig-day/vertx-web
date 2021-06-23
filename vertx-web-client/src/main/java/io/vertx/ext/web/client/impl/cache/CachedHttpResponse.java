@@ -18,10 +18,9 @@ package io.vertx.ext.web.client.impl.cache;
 import io.vertx.core.MultiMap;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpVersion;
-import io.vertx.ext.web.client.HttpRequest;
 import io.vertx.ext.web.client.HttpResponse;
-import io.vertx.ext.web.client.spi.CacheStore;
 import io.vertx.ext.web.client.impl.HttpResponseImpl;
+import io.vertx.ext.web.client.spi.CacheStore;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.Serializable;
@@ -42,35 +41,32 @@ public class CachedHttpResponse implements Serializable {
   private final int statusCode;
   private final String statusMessage;
   private final Buffer body;
-  private final MultiMap requestHeaders;
   private final MultiMap responseHeaders;
   private final Instant timestamp;
 
   transient private CacheControl cacheControl;
 
-  static CachedHttpResponse wrap(HttpRequest<?> request, HttpResponse<?> response) {
-    return wrap(request, response, CacheControl.parse(response.headers()));
+  static CachedHttpResponse wrap(HttpResponse<?> response) {
+    return wrap(response, CacheControl.parse(response.headers()));
   }
 
-  static CachedHttpResponse wrap(HttpRequest<?> request, HttpResponse<?> response, CacheControl cacheControl) {
+  static CachedHttpResponse wrap(HttpResponse<?> response, CacheControl cacheControl) {
     return new CachedHttpResponse(
       response.version().name(),
       response.statusCode(),
       response.statusMessage(),
       response.bodyAsBuffer(),
-      request.headers(),
       response.headers(),
       cacheControl
     );
   }
 
   CachedHttpResponse(String version, int statusCode, String statusMessage, Buffer body,
-    MultiMap requestHeaders, MultiMap responseHeaders, CacheControl cacheControl) {
+    MultiMap responseHeaders, CacheControl cacheControl) {
     this.version = version;
     this.statusCode = statusCode;
     this.statusMessage = statusMessage;
     this.body = body;
-    this.requestHeaders = requestHeaders;
     this.responseHeaders = responseHeaders;
     this.timestamp = Instant.now(); // TODO: should we look at the Date or Age header instead?
     this.cacheControl = cacheControl;

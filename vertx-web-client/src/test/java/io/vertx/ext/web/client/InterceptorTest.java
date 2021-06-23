@@ -11,7 +11,6 @@ import io.vertx.core.http.HttpClientOptions;
 import io.vertx.core.http.HttpServerOptions;
 import io.vertx.core.http.HttpTestBase;
 import io.vertx.core.http.HttpVersion;
-import io.vertx.core.http.RequestOptions;
 import io.vertx.core.json.JsonArray;
 import io.vertx.ext.unit.junit.RepeatRule;
 import io.vertx.ext.web.client.impl.ClientPhase;
@@ -19,7 +18,6 @@ import io.vertx.ext.web.client.impl.HttpContext;
 import io.vertx.ext.web.client.impl.WebClientInternal;
 import io.vertx.ext.web.codec.BodyCodec;
 
-import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.Test;
 
@@ -162,7 +160,8 @@ public class InterceptorTest extends HttpTestBase {
         "CREATE_REQUEST_1", "CREATE_REQUEST_2",
         "SEND_REQUEST_1", "SEND_REQUEST_2",
         "RECEIVE_RESPONSE_1", "RECEIVE_RESPONSE_2",
-        "DISPATCH_RESPONSE_1", "DISPATCH_RESPONSE_2"), events);
+        "DISPATCH_RESPONSE_1", "DISPATCH_RESPONSE_2",
+        "SEND_RESPONSE_1", "SEND_RESPONSE_2"), events);
       complete();
     }));
     await();
@@ -212,7 +211,7 @@ public class InterceptorTest extends HttpTestBase {
   public void testPhasesThreadFromNonVertxThread() throws Exception {
     server.requestHandler(req -> req.response().end());
     startServer();
-    testPhasesThread((t1, t2) -> Arrays.asList(t1, t1, t2, t2, t2));
+    testPhasesThread((t1, t2) -> Arrays.asList(t1, t1, t2, t2, t2, t2));
     await();
   }
 
@@ -223,7 +222,7 @@ public class InterceptorTest extends HttpTestBase {
     startServer();
     vertx.getOrCreateContext().runOnContext(v -> {
       setUpClient();
-      testPhasesThread((t1, t2) -> Arrays.asList(t2, t2, t2, t2, t2));
+      testPhasesThread((t1, t2) -> Arrays.asList(t2, t2, t2, t2, t2, t2));
     });
     await();
   }
@@ -408,7 +407,8 @@ public class InterceptorTest extends HttpTestBase {
         ClientPhase.CREATE_REQUEST,
         ClientPhase.SEND_REQUEST,
         ClientPhase.RECEIVE_RESPONSE,
-        ClientPhase.DISPATCH_RESPONSE), phases);
+        ClientPhase.DISPATCH_RESPONSE,
+        ClientPhase.SEND_RESPONSE), phases);
       assertEquals(Arrays.asList("/1", "/2"), requestUris);
       complete();
     }));
@@ -484,7 +484,8 @@ public class InterceptorTest extends HttpTestBase {
         ClientPhase.CREATE_REQUEST,
         ClientPhase.SEND_REQUEST,
         ClientPhase.RECEIVE_RESPONSE,
-        ClientPhase.DISPATCH_RESPONSE
+        ClientPhase.DISPATCH_RESPONSE,
+        ClientPhase.SEND_RESPONSE
         ), phases);
       assertEquals(Arrays.asList(
         "/",

@@ -17,20 +17,21 @@ package io.vertx.ext.web.client.impl;
 
 import io.vertx.core.http.HttpClient;
 import io.vertx.ext.web.client.CachingWebClientOptions;
-import io.vertx.ext.web.client.impl.cache.CacheManager;
+import io.vertx.ext.web.client.impl.cache.CacheInterceptor;
+import io.vertx.ext.web.client.spi.CacheStore;
 
 /**
  * @author <a href="mailto:craigday3@gmail.com">Craig Day</a>
  */
 public class CachingWebClientImpl extends WebClientBase {
 
-  public CachingWebClientImpl(HttpClient client, CacheManager cacheManager, CachingWebClientOptions options) {
+  public CachingWebClientImpl(HttpClient client, CacheStore cacheStore, CachingWebClientOptions options) {
     super(client, options);
-    addInterceptor(new CachingInterceptor(cacheManager));
+    addInterceptor(new CacheInterceptor(cacheStore, options));
   }
 
-  public CachingWebClientImpl(WebClientBase webClient, CacheManager cacheManager) {
+  public CachingWebClientImpl(WebClientBase webClient, CacheStore cacheStore, CachingWebClientOptions options) {
     super(webClient);
-    addInterceptor(new CachingInterceptor(cacheManager));
+    addInterceptor(new CacheInterceptor(cacheStore, options));
   }
 }

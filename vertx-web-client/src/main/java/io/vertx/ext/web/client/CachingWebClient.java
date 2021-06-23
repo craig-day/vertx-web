@@ -19,7 +19,6 @@ import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpClient;
 import io.vertx.ext.web.client.impl.CachingWebClientImpl;
 import io.vertx.ext.web.client.impl.WebClientBase;
-import io.vertx.ext.web.client.impl.cache.CacheManager;
 import io.vertx.ext.web.client.impl.cache.SharedDataCacheStore;
 import io.vertx.ext.web.client.spi.CacheStore;
 
@@ -126,8 +125,7 @@ public interface CachingWebClient {
    * @return the created web client
    */
   static WebClient create(WebClient webClient, CacheStore cacheStore, CachingWebClientOptions options) {
-    CacheManager cacheManager = new CacheManager(cacheStore, options);
-    return new CachingWebClientImpl((WebClientBase) webClient, cacheManager);
+    return new CachingWebClientImpl((WebClientBase) webClient, cacheStore, options);
   }
 
   /**
@@ -151,7 +149,6 @@ public interface CachingWebClient {
    * @return the created web client
    */
   static WebClient wrap(HttpClient httpClient, CacheStore cacheStore, CachingWebClientOptions options) {
-    CacheManager cacheManager = new CacheManager(cacheStore, options);
-    return new CachingWebClientImpl(httpClient, cacheManager, options);
+    return new CachingWebClientImpl(httpClient, cacheStore, options);
   }
 }

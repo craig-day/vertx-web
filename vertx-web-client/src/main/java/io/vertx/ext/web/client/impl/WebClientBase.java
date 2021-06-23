@@ -259,6 +259,9 @@ public class WebClientBase implements WebClientInternal {
 
   @Override
   public WebClientInternal addInterceptor(Handler<HttpContext<?>> interceptor) {
+    // If a web client is constructed using another client, interceptors could get added twice.
+    // This is an attempt to ensure that doesn't happen by keeping the most recent one added.
+    interceptors.removeIf(i -> i.getClass() == interceptor.getClass());
     interceptors.add(interceptor);
     return this;
   }
