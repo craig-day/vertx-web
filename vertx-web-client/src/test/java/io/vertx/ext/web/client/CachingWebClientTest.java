@@ -251,7 +251,6 @@ public class CachingWebClientTest {
   }
 
   @Test
-  @Ignore("Need to figure out revalidation requests with the interceptor pattern")
   public void testNoCache(TestContext context) {
     final AtomicBoolean replyWith304 = new AtomicBoolean(false);
 
@@ -472,7 +471,6 @@ public class CachingWebClientTest {
   }
 
   @Test
-  @Ignore("Need to figure out revalidation requests with the interceptor pattern")
   public void test304NotModifiedResponse(TestContext context) {
     Async primer = context.async();
     Async waiter = context.async();
@@ -501,7 +499,7 @@ public class CachingWebClientTest {
   }
 
   @Test
-  @Ignore("Need to figure out revalidation requests with the interceptor pattern")
+  @Ignore("Need to figure out how to send revalidation request and respond at the same time")
   public void testStaleWhileRevalidate(TestContext context) {
     startMockServer(context, "public, max-age=1, stale-while-revalidate=2");
 
@@ -525,7 +523,6 @@ public class CachingWebClientTest {
   }
 
   @Test
-  @Ignore("Need to figure out revalidation requests with the interceptor pattern")
   public void testStaleWhileRevalidateExpired(TestContext context) {
     startMockServer(context, "public, max-age=1, stale-while-revalidate=1");
 
@@ -552,7 +549,6 @@ public class CachingWebClientTest {
   }
 
   @Test
-  @Ignore("Need to figure out revalidation requests with the interceptor pattern")
   public void testStaleIfError(TestContext context) {
     Async waiter = context.async();
 
@@ -573,7 +569,6 @@ public class CachingWebClientTest {
   }
 
   @Test
-  @Ignore("Need to figure out revalidation requests with the interceptor pattern")
   public void testStaleIfErrorExpired(TestContext context) {
     Async waiter1 = context.async();
     Async waiter2 = context.async();

@@ -39,7 +39,8 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class CacheInterceptor implements Handler<HttpContext<?>> {
 
-  private static final String DISPATCH = "cache.dispatch";
+  private static final String IS_CACHE_DISPATCH = "cache.dispatch";
+  private static final String REVALIDATION_RESPONSE = "cache.response_to_revalidate";
 
   private final CacheStore cacheStore;
   private final CachingWebClientOptions options;
@@ -86,10 +87,10 @@ public class CacheInterceptor implements Handler<HttpContext<?>> {
 
     cacheStore
       .get(new CacheKey(context.request(), variation))
-      .compose(cached -> respondFromCache(requestImpl, cached))
+      .compose(cached -> respondFromCache(context, cached))
       .onComplete(ar -> {
         if (ar.succeeded()) {
-          context.set(DISPATCH, true);
+          context.set(IS_CACHE_DISPATCH, true);
           context.dispatchResponse(ar.result());
         } else {
           context.next();
@@ -98,27 +99,27 @@ public class CacheInterceptor implements Handler<HttpContext<?>> {
   }
 
   private void handleDispatchResponse(HttpContext<Buffer> context) {
-    Boolean isCacheDispatch = context.get(DISPATCH);
-
+    Boolean isCacheDispatch = context.get(IS_CACHE_DISPATCH);
     if (isCacheDispatch != null && isCacheDispatch) {
       context.next();
       return;
     }
 
-    processResponse(context.request(), context.response(), null).onComplete(ar -> {
-      context.next();
-    });
-  }
-
-  private Future<HttpResponse<Buffer>> processResponse(HttpRequest<Buffer> request, HttpResponse<Buffer> response, CachedHttpResponse cachedResponse) {
-    if (options.getCachedStatusCodes().contains(response.statusCode())) {
-      // Request was successful, attempt to cache response
-      return cacheResponse(request, response).map(response);
-    } else if (cachedResponse != null && cachedResponse.useStaleIfError()) {
-      return Future.succeededFuture(cachedResponse.rehydrate());
+    CachedHttpResponse responseToValidate = context.get(REVALIDATION_RESPONSE);
+    if (responseToValidate != null) {
+      // We're revalidating a cached response
+      processRevalidationResponse(context, responseToValidate).onComplete(ar -> {
+        if (ar.succeeded()) {
+          context.response(ar.result());
+        }
+        context.next();
+      });
     } else {
-      // Response is not cacheable, do nothing
-      return Future.succeededFuture(response);
+      // We're storing a new response in cache
+      processResponse(context, null).onComplete(ar -> {
+        // TODO: is this right? if we don't need the data then use a callback, not a future
+        context.next();
+      });
     }
   }
 
@@ -135,9 +136,25 @@ public class CacheInterceptor implements Handler<HttpContext<?>> {
     return null;
   }
 
-  private Future<HttpResponse<Buffer>> respondFromCache(HttpRequestImpl<Buffer> request, CachedHttpResponse response) {
+  private Future<HttpResponse<Buffer>> processResponse(HttpContext<Buffer> context, CachedHttpResponse cachedResponse) {
+    HttpRequest<Buffer> request = context.request();
+    HttpResponse<Buffer> response = context.response();
+
+    if (options.getCachedStatusCodes().contains(response.statusCode())) {
+      // Request was successful, attempt to cache response
+      return cacheResponse(request, response).map(response);
+    } else if (cachedResponse != null && cachedResponse.useStaleIfError()) {
+      // TODO: we should check that this is an error too
+      return Future.succeededFuture(cachedResponse.rehydrate());
+    } else {
+      // Response is not cacheable, do nothing
+      return Future.succeededFuture(response);
+    }
+  }
+
+  private Future<HttpResponse<Buffer>> respondFromCache(HttpContext<?> context, CachedHttpResponse response) {
     if (response == null) {
-      return Future.failedFuture("http cache miss");
+      return Future.failedFuture("cache miss");
     }
 
     HttpResponse<Buffer> result = response.rehydrate();
@@ -145,38 +162,38 @@ public class CacheInterceptor implements Handler<HttpContext<?>> {
 
     if (response.cacheControl().noCache()) {
       // We must validate with the server before releasing the cached data
-      return handleStaleCacheResult(request, response);
+      return revalidate(context, response);
     } else if (response.isFresh()) {
       // Response is current, reply with it immediately
       return Future.succeededFuture(result);
     } else if (response.useStaleWhileRevalidate()) {
       // Send off a request to revalidate the cache but don't want for a response, just respond
       // immediately with the cached value.
-      handleStaleCacheResult(request, response);
-      return Future.succeededFuture(result);
+      revalidateAsync(context, response);
+      return Future.failedFuture("TODO");
     } else {
       // Can't use the response as-is, fetch updated information before responding
-      return handleStaleCacheResult(request, response);
+      return revalidate(context, response);
     }
   }
 
-  private Future<HttpResponse<Buffer>> handleStaleCacheResult(HttpRequestImpl<Buffer> request, CachedHttpResponse response) {
-    request.headers().set(HttpHeaders.IF_NONE_MATCH, response.cacheControl().getEtag());
+  private Future<HttpResponse<Buffer>> revalidate(HttpContext<?> context, CachedHttpResponse response) {
+    context.request().headers().set(HttpHeaders.IF_NONE_MATCH, response.cacheControl().getEtag());
 
-    // TODO: how do I send the request and know the next interceptor run is for a revalidation
-    return Future.failedFuture("TODO");
-    // return request
-    //  .send()
-    //  .compose(updatedResponse -> processRevalidationResponse(request, updatedResponse, response))
-    //  .recover(e -> response.useStaleIfError() ? Future.succeededFuture(response.rehydrate()) : Future.failedFuture(e));
+    context.set(REVALIDATION_RESPONSE, response);
+    return Future.failedFuture("revalidation needed");
   }
 
-  private Future<HttpResponse<Buffer>> processRevalidationResponse(HttpRequest<Buffer> request, HttpResponse<Buffer> response, CachedHttpResponse cachedResponse) {
-    if (response.statusCode() == 304) {
+  private void revalidateAsync(HttpContext<?> context, CachedHttpResponse response) {
+    // TODO: can we clone the context and then send it off but continue this copy?
+  }
+
+  private Future<HttpResponse<Buffer>> processRevalidationResponse(HttpContext<Buffer> context, CachedHttpResponse cachedResponse) {
+    if (context.response().statusCode() == 304) {
       // The cache returned a stale result, but server has confirmed still good. Update cache
-      return cacheResponse(request, cachedResponse.rehydrate());
+      return cacheResponse(context.request(), cachedResponse.rehydrate());
     } else {
-      return processResponse(request, response, cachedResponse);
+      return processResponse(context, cachedResponse);
     }
   }
 
