@@ -15,10 +15,12 @@
  */
 package io.vertx.ext.web.client;
 
+import io.vertx.codegen.annotations.VertxGen;
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpClient;
-import io.vertx.ext.web.client.impl.CachingWebClientImpl;
 import io.vertx.ext.web.client.impl.WebClientBase;
+import io.vertx.ext.web.client.impl.WebClientInternal;
+import io.vertx.ext.web.client.impl.cache.CacheInterceptor;
 import io.vertx.ext.web.client.impl.cache.SharedDataCacheStore;
 import io.vertx.ext.web.client.spi.CacheStore;
 
@@ -52,6 +54,7 @@ import io.vertx.ext.web.client.spi.CacheStore;
  *
  * @author <a href="mailto:craigday3@gmail.com">Craig Day</a>
  */
+@VertxGen
 public interface CachingWebClient {
 
   /**
@@ -125,7 +128,9 @@ public interface CachingWebClient {
    * @return the created web client
    */
   static WebClient create(WebClient webClient, CacheStore cacheStore, CachingWebClientOptions options) {
-    return new CachingWebClientImpl((WebClientBase) webClient, cacheStore, options);
+    WebClientInternal cacheClient = (WebClientInternal) webClient;
+    cacheClient.addInterceptor(new CacheInterceptor(cacheStore,  options));
+    return cacheClient;
   }
 
   /**
@@ -149,6 +154,7 @@ public interface CachingWebClient {
    * @return the created web client
    */
   static WebClient wrap(HttpClient httpClient, CacheStore cacheStore, CachingWebClientOptions options) {
-    return new CachingWebClientImpl(httpClient, cacheStore, options);
+    WebClient webClient = new WebClientBase(httpClient, options);
+    return create(webClient, cacheStore, options);
   }
 }

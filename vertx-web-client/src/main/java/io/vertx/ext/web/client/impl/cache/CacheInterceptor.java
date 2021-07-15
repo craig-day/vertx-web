@@ -29,6 +29,7 @@ import io.vertx.ext.web.client.spi.CacheStore;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -74,24 +75,20 @@ public class CacheInterceptor implements Handler<HttpContext<?>> {
 
   private void handleSendRequest(HttpContext<Buffer> context) {
     HttpRequestImpl<Buffer> requestImpl = (HttpRequestImpl<Buffer>) context.request();
-    if (!HttpMethod.GET.equals(requestImpl.method())) {
-      context.next();
-      return;
-    }
+    Vary variation;
 
-    Vary variation = selectVariation(requestImpl);
-    if (variation == null) {
+    if (!HttpMethod.GET.equals(requestImpl.method()) || (variation = selectVariation(requestImpl)) == null) {
       context.next();
       return;
     }
 
     cacheStore
       .get(new CacheKey(context.request(), variation))
-      .compose(cached -> respondFromCache(context, cached))
+      .map(cached -> respondFromCache(context, cached))
       .onComplete(ar -> {
-        if (ar.succeeded()) {
+        if (ar.succeeded() && ar.result().isPresent()) {
           context.set(IS_CACHE_DISPATCH, true);
-          context.dispatchResponse(ar.result());
+          context.dispatchResponse(ar.result().get());
         } else {
           context.next();
         }
@@ -100,7 +97,7 @@ public class CacheInterceptor implements Handler<HttpContext<?>> {
 
   private void handleDispatchResponse(HttpContext<Buffer> context) {
     Boolean isCacheDispatch = context.get(IS_CACHE_DISPATCH);
-    if (isCacheDispatch != null && isCacheDispatch) {
+    if (isCacheDispatch == Boolean.TRUE) {
       context.next();
       return;
     }
@@ -117,7 +114,6 @@ public class CacheInterceptor implements Handler<HttpContext<?>> {
     } else {
       // We're storing a new response in cache
       processResponse(context, null).onComplete(ar -> {
-        // TODO: is this right? if we don't need the data then use a callback, not a future
         context.next();
       });
     }
@@ -152,9 +148,9 @@ public class CacheInterceptor implements Handler<HttpContext<?>> {
     }
   }
 
-  private Future<HttpResponse<Buffer>> respondFromCache(HttpContext<Buffer> context, CachedHttpResponse response) {
+  private Optional<HttpResponse<Buffer>> respondFromCache(HttpContext<Buffer> context, CachedHttpResponse response) {
     if (response == null) {
-      return Future.failedFuture("cache miss");
+      return Optional.empty();
     }
 
     HttpResponse<Buffer> result = response.rehydrate();
@@ -162,26 +158,26 @@ public class CacheInterceptor implements Handler<HttpContext<?>> {
 
     if (response.cacheControl().noCache()) {
       // We must validate with the server before releasing the cached data
-      return revalidate(context, response);
+      markForRevalidation(context, response);
+      return Optional.empty();
     } else if (response.isFresh()) {
       // Response is current, reply with it immediately
-      return Future.succeededFuture(result);
+      return Optional.of(result);
     } else if (response.useStaleWhileRevalidate()) {
       // Send off a request to revalidate the cache but don't want for a response, just respond
       // immediately with the cached value.
       context.clientRequest().send();
-      return Future.succeededFuture(result);
+      return Optional.of(result);
     } else {
       // Can't use the response as-is, fetch updated information before responding
-      return revalidate(context, response);
+      markForRevalidation(context, response);
+      return Optional.empty();
     }
   }
 
-  private Future<HttpResponse<Buffer>> revalidate(HttpContext<?> context, CachedHttpResponse response) {
+  private void markForRevalidation(HttpContext<?> context, CachedHttpResponse response) {
     context.request().headers().set(HttpHeaders.IF_NONE_MATCH, response.cacheControl().getEtag());
-
     context.set(REVALIDATION_RESPONSE, response);
-    return Future.failedFuture("revalidation needed");
   }
 
   private Future<HttpResponse<Buffer>> processRevalidationResponse(HttpContext<Buffer> context, CachedHttpResponse cachedResponse) {

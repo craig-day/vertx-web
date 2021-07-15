@@ -77,11 +77,11 @@ public class CachedHttpResponse implements Serializable {
   }
 
   public boolean useStaleWhileRevalidate() {
-    return useStale(CacheControlDirectives.STALE_WHILE_REVALIDATE);
+    return useStale(CacheControlDirective.STALE_WHILE_REVALIDATE);
   }
 
   public boolean useStaleIfError() {
-    return useStale(CacheControlDirectives.STALE_IF_ERROR);
+    return useStale(CacheControlDirective.STALE_IF_ERROR);
   }
 
   public long age() {
@@ -108,7 +108,7 @@ public class CachedHttpResponse implements Serializable {
     );
   }
 
-  private boolean useStale(String directive) {
+  private boolean useStale(CacheControlDirective directive) {
     long secondsStale = Math.max(0L, age() - cacheControl().getMaxAge());
 
     long maxSecondsStale = cacheControl()
